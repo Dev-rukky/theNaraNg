@@ -19,7 +19,7 @@ export default function RootLayout({
       <body className="font-sans antialiased bg-background text-foreground">
         <ThemeProvider attribute="class" defaultTheme="dark" storageKey="nara:theme">
           
-          {/* Wrap your app in the React Query Provider */}
+          
           <Providers>
             {children}
           </Providers>
