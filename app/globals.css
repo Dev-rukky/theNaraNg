@@ -1,26 +1,193 @@
-@import "tailwindcss";
+@import "tailwindcss" ;
+@import "tw-animate-css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* Nara brand tokens */
+  --color-nara-black: var(--nara-black);
+  --color-nara-surface: var(--nara-surface);
+  --color-nara-surface2: var(--nara-surface2);
+  --color-nara-border: var(--nara-border);
+  --color-nara-amber: var(--nara-amber);
+  --color-nara-amber2: var(--nara-amber2);
+  --color-nara-text: var(--nara-text);
+  --color-nara-muted: var(--nara-muted);
+  --color-nara-green: var(--nara-green);
+  --color-nara-red: var(--nara-red);
+
+  --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  --radius: 0.625rem;
+
+  /* Nara palette — dark (default) */
+  --nara-black: #0F0F14;
+  --nara-surface: #16161E;
+  --nara-surface2: #1E1E28;
+  --nara-border: #2A2A38;
+  --nara-amber: #EF9F27;
+  --nara-amber2: #F9C74F;
+  --nara-text: #F5F0E8;
+  --nara-muted: #8A8490;
+  --nara-green: #1D9E75;
+  --nara-red: #D85A30;
+
+  /* Map shadcn tokens to Nara palette */
+  --background: var(--nara-black);
+  --foreground: var(--nara-text);
+  --card: var(--nara-surface);
+  --card-foreground: var(--nara-text);
+  --popover: var(--nara-surface);
+  --popover-foreground: var(--nara-text);
+  --primary: var(--nara-amber);
+  --primary-foreground: var(--nara-black);
+  --secondary: var(--nara-surface2);
+  --secondary-foreground: var(--nara-text);
+  --muted: var(--nara-surface2);
+  --muted-foreground: var(--nara-muted);
+  --accent: var(--nara-amber);
+  --accent-foreground: var(--nara-black);
+  --destructive: var(--nara-red);
+  --destructive-foreground: var(--nara-text);
+  --border: var(--nara-border);
+  --input: var(--nara-border);
+  --ring: var(--nara-amber);
+}
+
+/* Light theme — warm paper. Brand amber/green/red darkened for contrast. */
+:root.light {
+  --nara-black: #FAF7F0;
+  --nara-surface: #FFFFFF;
+  --nara-surface2: #F2EDE3;
+  --nara-border: #E5DFD1;
+  --nara-amber: #B8740A;
+  --nara-amber2: #D98A12;
+  --nara-text: #1A1A24;
+  --nara-muted: #6B6470;
+  --nara-green: #15815F;
+  --nara-red: #B8421F;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html {
+    background-color: var(--background);
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    font-feature-settings: "ss01", "cv11";
+  }
+  ::selection {
+    background: var(--color-nara-amber);
+    color: var(--color-nara-black);
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@utility text-balance { text-wrap: balance; }
+@utility text-pretty  { text-wrap: pretty; }
+
+@utility nara-dot-grid {
+  background-image: radial-gradient(circle at 1px 1px, rgba(245,240,232,0.06) 1px, transparent 0);
+  background-size: 24px 24px;
+}
+
+@utility nara-amber-glow {
+  background-image: radial-gradient(ellipse 800px 320px at 50% 40%, rgba(239,159,39,0.10) 0%, transparent 70%);
+}
+
+@utility nara-card {
+  background-color: var(--color-nara-surface);
+  border: 1px solid var(--color-nara-border);
+  border-radius: var(--radius-2xl);
+  transition: border-color .25s ease, box-shadow .25s ease, transform .25s ease;
+}
+@utility nara-card-hover {
+  &:hover {
+    border-color: color-mix(in oklab, var(--color-nara-amber) 35%, transparent);
+    box-shadow: 0 0 40px rgba(239,159,39,0.07);
+  }
+}
+
+@utility nara-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-nara-amber);
+}
+
+@keyframes nara-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(29,158,117,0.55); }
+  50%      { box-shadow: 0 0 0 8px rgba(29,158,117,0); }
+}
+@utility nara-live-dot {
+  display: inline-block;
+  width: 8px; height: 8px; border-radius: 9999px;
+  background: var(--color-nara-green);
+  animation: nara-pulse 1.8s ease-out infinite;
+}
+
+@keyframes nara-amber-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(239,159,39,0.55); }
+  50%      { box-shadow: 0 0 0 8px rgba(239,159,39,0); }
+}
+@utility nara-amber-dot {
+  display: inline-block;
+  width: 8px; height: 8px; border-radius: 9999px;
+  background: var(--color-nara-amber);
+  animation: nara-amber-pulse 1.8s ease-out infinite;
+}
+
+@keyframes nara-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+@utility nara-shimmer {
+  background: linear-gradient(90deg,
+    var(--color-nara-surface) 0%,
+    var(--color-nara-surface2) 50%,
+    var(--color-nara-surface) 100%);
+  background-size: 200% 100%;
+  animation: nara-shimmer 1.8s linear infinite;
+}
+
+@keyframes ticker {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
