@@ -5,9 +5,9 @@ import Link from "next/link";
 import { gsap, useGSAP } from "@/lib/nara/gsap"; // Pointing to our new clean GSAP file
 import { AmberButton, DataLabel } from "./primitives";
 import { DashboardMockup } from "./dashboardmockup";
+import type { LandingData } from "@/lib/nara/bayse.function";
 
-export function Hero() {
-  // 1. Create a standard DOM reference for the section
+export function Hero({ initialData }: { initialData: LandingData }) {
   const container = useRef<HTMLElement>(null);
 
   // 2. Use the official hook, passing the container ref as the scope
@@ -73,7 +73,8 @@ export function Hero() {
       </div>
 
       <div className="hero-mock relative z-10 mx-auto mt-16 w-full max-w-6xl translate-y-20 px-6 sm:translate-y-24">
-        <DashboardMockup compact />
+        {/* 2. Pass it into the mockup */}
+        <DashboardMockup compact initialData={initialData} /> 
       </div>
     </section>
   );

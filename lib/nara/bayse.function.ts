@@ -1,7 +1,7 @@
-import { createServerFn } from "@tanstack/react-start";
+"use server";
+
 import { MARKETS, STATS, TICKER, USDNGN_HISTORY } from "./mock";
 import { bayseFetch } from "./bayse-client";
-
 
 type BayseMarket = {
   id: string;
@@ -159,9 +159,6 @@ function buildMockLanding(reason: string): LandingData {
   };
 }
 
-
-
-
 function fmtResolve(iso?: string): string {
   if (!iso) return "TBA";
   const d = new Date(iso);
@@ -256,121 +253,122 @@ function historyToSeries(
   return out;
 }
 
-export const getLandingData = createServerFn({ method: "GET" }).handler(
-  async (): Promise<LandingData> => {
-    const path = `/pm/events?currency=NGN&perPage=30&page=1&status=open`;
-    let payload: BayseEventsResponse;
-    try {
-      payload = await bayseFetch<BayseEventsResponse>(path, { integration: "list-events" });
-    } catch (err) {
-      const reason = err instanceof Error ? err.message : "unknown error";
-      console.error("[bayse] list-events failed after retries:", reason);
-      return buildMockLanding(reason);
-    }
+// ---------------------------------------------------------
+// SERVER ACTIONS (Replaces createServerFn)
+// ---------------------------------------------------------
 
-    if (!payload?.events?.length) {
-      return buildMockLanding("Bayse returned no open events");
-    }
+export async function getLandingData(): Promise<LandingData> {
+  const path = `/pm/events?currency=NGN&perPage=30&page=1&status=open`;
+  let payload: BayseEventsResponse;
+  
+  try {
+    payload = await bayseFetch<BayseEventsResponse>(path, { integration: "list-events" });
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "unknown error";
+    console.error("[bayse] list-events failed after retries:", reason);
+    return buildMockLanding(reason);
+  }
 
-    const events = (payload.events ?? []).filter(
-      (e) => e.status === "open" && e.markets?.length,
-    );
+  if (!payload?.events?.length) {
+    return buildMockLanding("Bayse returned no open events");
+  }
 
-    // featured = highest scoring event
-    const ranked = [...events].sort((a, b) => scoreFeatured(b) - scoreFeatured(a));
-    const featuredEv = ranked[0];
-    const featuredMarket = featuredEv ? pickPrimaryMarket(featuredEv) : undefined;
+  const events = (payload.events ?? []).filter(
+    (e) => e.status === "open" && e.markets?.length,
+  );
 
-    // pick top markets by volume for the landing
-    const topEvents = [...events]
-      .sort((a, b) => (b.totalVolume ?? 0) - (a.totalVolume ?? 0))
-      .slice(0, 8);
+  // featured = highest scoring event
+  const ranked = [...events].sort((a, b) => scoreFeatured(b) - scoreFeatured(a));
+  const featuredEv = ranked[0];
+  const featuredMarket = featuredEv ? pickPrimaryMarket(featuredEv) : undefined;
 
-    // fetch 24h price history in parallel for delta computation
-    const ids = new Set<string>();
-    topEvents.forEach((e) => ids.add(e.id));
-    if (featuredEv) ids.add(featuredEv.id);
+  // pick top markets by volume for the landing
+  const topEvents = [...events]
+    .sort((a, b) => (b.totalVolume ?? 0) - (a.totalVolume ?? 0))
+    .slice(0, 8);
 
-    const histArr = await Promise.all(
-      Array.from(ids).map(async (id) => {
-        const h = await fetchPriceHistory(
-          id,
-          id === featuredEv?.id ? "1W" : "24H",
-        );
-        return [id, h] as const;
-      }),
-    );
-    const histMap = new Map(histArr);
+  // fetch 24h price history in parallel for delta computation
+  const ids = new Set<string>();
+  topEvents.forEach((e) => ids.add(e.id));
+  if (featuredEv) ids.add(featuredEv.id);
 
-    const markets: LandingMarket[] = topEvents.map((ev) => {
-      const pm = pickPrimaryMarket(ev);
-      const yes = pm ? pm.outcome1Price * 100 : 0;
-      const delta = computeDelta(histMap.get(ev.id) ?? null, pm?.id);
-      return {
-        id: ev.id,
-        slug: ev.slug,
-        name: ev.title,
-        yes: Number(yes.toFixed(1)),
-        delta: Number(delta.toFixed(1)),
-        volume: Math.round(ev.totalVolume ?? 0),
-        resolves: fmtResolve(ev.closingDate ?? ev.resolutionDate),
-      };
-    });
+  const histArr = await Promise.all(
+    Array.from(ids).map(async (id) => {
+      const h = await fetchPriceHistory(
+        id,
+        id === featuredEv?.id ? "1W" : "24H",
+      );
+      return [id, h] as const;
+    }),
+  );
+  const histMap = new Map(histArr);
 
-    const ticker = markets.map((m) => ({ name: m.name, yes: m.yes, delta: m.delta }));
-
-    const featuredHistory = featuredEv ? histMap.get(featuredEv.id) ?? null : null;
-    const history = historyToSeries(featuredHistory, featuredMarket?.id);
-    const featuredYes = featuredMarket ? featuredMarket.outcome1Price * 100 : 0;
-    const featuredDelta = computeDelta(featuredHistory, featuredMarket?.id);
-
-    const [totalVolume, sevenDayVolume] = [
-      events.reduce((s, e) => s + (e.totalVolume ?? 0), 0),
-      await fetchRolling7dNotional(),
-    ];
-    const volume = sevenDayVolume > 0 ? sevenDayVolume : Math.round(totalVolume);
-    const now = Date.now();
-    const weekMs = 7 * 24 * 3600 * 1000;
-    const resolvingSoon = events.filter((e) => {
-      const c = e.closingDate ? new Date(e.closingDate).getTime() : 0;
-      return c && c - now > 0 && c - now < weekMs;
-    }).length;
-    const sharpest = markets.reduce((mx, m) => Math.max(mx, Math.abs(m.delta)), 0);
-
+  const markets: LandingMarket[] = topEvents.map((ev) => {
+    const pm = pickPrimaryMarket(ev);
+    const yes = pm ? pm.outcome1Price * 100 : 0;
+    const delta = computeDelta(histMap.get(ev.id) ?? null, pm?.id);
     return {
-      markets,
-      ticker: ticker.length ? ticker : [],
-      history,
-      featured: {
-        id: featuredEv?.id ?? "",
-        slug: featuredEv?.slug ?? "",
-        title: featuredEv?.title ?? "—",
-        yes: Number(featuredYes.toFixed(1)),
-        delta: Number(featuredDelta.toFixed(1)),
-      },
-      stats: {
-        volume,
-        markets: events.length,
-        sharpest: Number(sharpest.toFixed(1)),
-        resolvingSoon,
-        accuracy: 73.4,
-      },
-      asOf: new Date().toISOString(),
-      source: "bayse",
-      degraded: false,
+      id: ev.id,
+      slug: ev.slug,
+      name: ev.title,
+      yes: Number(yes.toFixed(1)),
+      delta: Number(delta.toFixed(1)),
+      volume: Math.round(ev.totalVolume ?? 0),
+      resolves: fmtResolve(ev.closingDate ?? ev.resolutionDate),
     };
-  },
-);
+  });
+
+  const ticker = markets.map((m) => ({ name: m.name, yes: m.yes, delta: m.delta }));
+
+  const featuredHistory = featuredEv ? histMap.get(featuredEv.id) ?? null : null;
+  const history = historyToSeries(featuredHistory, featuredMarket?.id);
+  const featuredYes = featuredMarket ? featuredMarket.outcome1Price * 100 : 0;
+  const featuredDelta = computeDelta(featuredHistory, featuredMarket?.id);
+
+  const [totalVolume, sevenDayVolume] = [
+    events.reduce((s, e) => s + (e.totalVolume ?? 0), 0),
+    await fetchRolling7dNotional(),
+  ];
+  const volume = sevenDayVolume > 0 ? sevenDayVolume : Math.round(totalVolume);
+  const now = Date.now();
+  const weekMs = 7 * 24 * 3600 * 1000;
+  const resolvingSoon = events.filter((e) => {
+    const c = e.closingDate ? new Date(e.closingDate).getTime() : 0;
+    return c && c - now > 0 && c - now < weekMs;
+  }).length;
+  const sharpest = markets.reduce((mx, m) => Math.max(mx, Math.abs(m.delta)), 0);
+
+  return {
+    markets,
+    ticker: ticker.length ? ticker : [],
+    history,
+    featured: {
+      id: featuredEv?.id ?? "",
+      slug: featuredEv?.slug ?? "",
+      title: featuredEv?.title ?? "—",
+      yes: Number(featuredYes.toFixed(1)),
+      delta: Number(featuredDelta.toFixed(1)),
+    },
+    stats: {
+      volume,
+      markets: events.length,
+      sharpest: Number(sharpest.toFixed(1)),
+      resolvingSoon,
+      accuracy: 73.4,
+    },
+    asOf: new Date().toISOString(),
+    source: "bayse",
+    degraded: false,
+  };
+}
 
 export type HistoryRange = "1W" | "1M";
 
-export const getEventHistory = createServerFn({ method: "GET" })
-  .inputValidator((d: { eventId: string; range?: HistoryRange }) => d)
-  .handler(async ({ data }): Promise<HistoryPoint[]> => {
-    const range: HistoryRange = data.range ?? "1W";
-    const h = await fetchPriceHistory(data.eventId, range);
-    return historyToSeries(h);
-  });
+export async function getEventHistory(data: { eventId: string; range?: HistoryRange }): Promise<HistoryPoint[]> {
+  const range: HistoryRange = data.range ?? "1W";
+  const h = await fetchPriceHistory(data.eventId, range);
+  return historyToSeries(h);
+}
 
 // ===================== All-markets feed =====================
 export type MarketStatus = "active" | "resolving_soon" | "resolved";
@@ -423,101 +421,101 @@ function statusOf(ev: BayseEvent, closeMs: number, now: number): MarketStatus {
   return "active";
 }
 
-export const getAllMarkets = createServerFn({ method: "GET" }).handler(
-  async (): Promise<AllMarketsData> => {
-    const PER_PAGE = 100;
-    const MAX_PAGES = 6;
-    const events: BayseEvent[] = [];
-    let degraded = false;
-    let reason: string | undefined;
-    try {
-      for (let page = 1; page <= MAX_PAGES; page++) {
-        const path = `/pm/events?currency=NGN&perPage=${PER_PAGE}&page=${page}&status=open`;
-        const payload = await bayseFetch<BayseEventsResponse>(path, {
-          integration: "list-events",
-          attempts: 2,
-          timeoutMs: 6000,
-        });
-        const batch = payload?.events ?? [];
-        events.push(...batch);
-        const last = payload?.pagination?.lastPage ?? page;
-        if (page >= last || batch.length < PER_PAGE) break;
-      }
-    } catch (err) {
-      degraded = true;
-      reason = err instanceof Error ? err.message : "unknown error";
-      console.error("[bayse] getAllMarkets failed:", reason);
+export async function getAllMarkets(): Promise<AllMarketsData> {
+  const PER_PAGE = 100;
+  const MAX_PAGES = 6;
+  const events: BayseEvent[] = [];
+  let degraded = false;
+  let reason: string | undefined;
+  
+  try {
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const path = `/pm/events?currency=NGN&perPage=${PER_PAGE}&page=${page}&status=open`;
+      const payload = await bayseFetch<BayseEventsResponse>(path, {
+        integration: "list-events",
+        attempts: 2,
+        timeoutMs: 6000,
+      });
+      const batch = payload?.events ?? [];
+      events.push(...batch);
+      const last = payload?.pagination?.lastPage ?? page;
+      if (page >= last || batch.length < PER_PAGE) break;
     }
+  } catch (err) {
+    degraded = true;
+    reason = err instanceof Error ? err.message : "unknown error";
+    console.error("[bayse] getAllMarkets failed:", reason);
+  }
 
-    if (!events.length) {
-      const mock = buildMockLanding(reason ?? "Bayse returned no markets");
-      const rows: AllMarketsRow[] = mock.markets.map((m) => ({
-        id: m.id,
-        slug: m.slug,
-        name: m.name,
-        category: "other" as const,
-        yes: m.yes,
-        delta: m.delta,
-        volume: m.volume,
-        resolves: m.resolves,
-        resolvesAt: 0,
-        status: "active" as const,
-      }));
-      return {
-        rows,
-        total: rows.length,
-        asOf: new Date().toISOString(),
-        source: "mock",
-        degraded: true,
-        degradedReason: reason ?? "mock fallback",
-      };
-    }
-
-    const now = Date.now();
-    const open = events.filter((e) => e.markets?.length);
-
-    const topForDelta = [...open]
-      .sort((a, b) => (b.totalVolume ?? 0) - (a.totalVolume ?? 0))
-      .slice(0, 30);
-    const histArr = await Promise.all(
-      topForDelta.map(async (e) => [e.id, await fetchPriceHistory(e.id, "24H")] as const),
-    );
-    const histMap = new Map(histArr);
-
-    const rows: AllMarketsRow[] = open.map((ev) => {
-      const pm = pickPrimaryMarket(ev);
-      const yes = pm ? pm.outcome1Price * 100 : 0;
-      const closeIso = ev.closingDate ?? ev.resolutionDate;
-      const closeMs = closeIso ? new Date(closeIso).getTime() : 0;
-      const delta = computeDelta(histMap.get(ev.id) ?? null, pm?.id);
-      // Bayse's totalVolume is always 0 on the events endpoint; fall back to
-      // liquidity (notional pool) which IS populated, otherwise approximate
-      // from order count * average ticket size.
-      const liq = Math.round(ev.liquidity ?? 0);
-      const orderProxy = (ev.totalOrders ?? 0) * 500;
-      const volume = Math.max(Math.round(ev.totalVolume ?? 0), liq, orderProxy);
-      return {
-        id: ev.id,
-        slug: ev.slug,
-        name: ev.title,
-        category: categorize(ev),
-        yes: Number(yes.toFixed(1)),
-        delta: Number(delta.toFixed(1)),
-        volume,
-        resolves: fmtResolve(closeIso),
-        resolvesAt: closeMs,
-        status: statusOf(ev, closeMs, now),
-      };
-    });
-
+  if (!events.length) {
+    const mock = buildMockLanding(reason ?? "Bayse returned no markets");
+    const rows: AllMarketsRow[] = mock.markets.map((m) => ({
+      id: m.id,
+      slug: m.slug,
+      name: m.name,
+      category: "other" as const,
+      yes: m.yes,
+      delta: m.delta,
+      volume: m.volume,
+      resolves: m.resolves,
+      resolvesAt: 0,
+      status: "active" as const,
+    }));
     return {
       rows,
       total: rows.length,
       asOf: new Date().toISOString(),
-      source: "bayse",
-      degraded,
-      degradedReason: reason,
+      source: "mock",
+      degraded: true,
+      degradedReason: reason ?? "mock fallback",
     };
-  },
-);
+  }
 
+  const now = Date.now();
+  const open = events.filter((e) => e.markets?.length);
+
+  const topForDelta = [...open]
+    .sort((a, b) => (b.totalVolume ?? 0) - (a.totalVolume ?? 0))
+    .slice(0, 30);
+  
+  const histArr = await Promise.all(
+    topForDelta.map(async (e) => [e.id, await fetchPriceHistory(e.id, "24H")] as const),
+  );
+  const histMap = new Map(histArr);
+
+  const rows: AllMarketsRow[] = open.map((ev) => {
+    const pm = pickPrimaryMarket(ev);
+    const yes = pm ? pm.outcome1Price * 100 : 0;
+    const closeIso = ev.closingDate ?? ev.resolutionDate;
+    const closeMs = closeIso ? new Date(closeIso).getTime() : 0;
+    const delta = computeDelta(histMap.get(ev.id) ?? null, pm?.id);
+    // Bayse's totalVolume is always 0 on the events endpoint; fall back to
+    // liquidity (notional pool) which IS populated, otherwise approximate
+    // from order count * average ticket size.
+    const liq = Math.round(ev.liquidity ?? 0);
+    const orderProxy = (ev.totalOrders ?? 0) * 500;
+    const volume = Math.max(Math.round(ev.totalVolume ?? 0), liq, orderProxy);
+    
+    return {
+      id: ev.id,
+      slug: ev.slug,
+      name: ev.title,
+      category: categorize(ev),
+      yes: Number(yes.toFixed(1)),
+      delta: Number(delta.toFixed(1)),
+      volume,
+      resolves: fmtResolve(closeIso),
+      resolvesAt: closeMs,
+      status: statusOf(ev, closeMs, now),
+    };
+  });
+
+  return {
+    rows,
+    total: rows.length,
+    asOf: new Date().toISOString(),
+    source: "bayse",
+    degraded,
+    degradedReason: reason,
+  };
+}

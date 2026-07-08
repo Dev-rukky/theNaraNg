@@ -1,67 +1,51 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useState, type ReactNode } from "react";
 
 export type Theme = "dark" | "light";
 
-const STORAGE_KEY = "nara:theme";
-
-type ThemeCtx = {
+type ThemeContextType = {
   theme: Theme;
   setTheme: (t: Theme) => void;
-  toggle: () => void;
+  toggleTheme: () => void;
 };
 
-const Ctx = createContext<ThemeCtx | null>(null);
+const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
-export function ThemeProvider({ children }: { children: ReactNode }) {
-  // 1. Default to 'dark' for the initial server render to match your HTML defaults
-  const [theme, setThemeState] = useState<Theme>("dark");
-  const [mounted, setMounted] = useState(false);
+export function ThemeProvider({ 
+  children, 
+  initialTheme 
+}: { 
+  children: ReactNode;
+  initialTheme: Theme;
+}) {
+  const [theme, setThemeState] = useState<Theme>(initialTheme);
 
-  // 2. Once mounted on the client, sync React state with the actual DOM
-  // The inline script in layout.tsx will have already set the correct classes
-  useEffect(() => {
-    setMounted(true);
+  const setTheme = (newTheme: Theme) => {
+    // 1. Update the DOM for immediate feedback
     const root = document.documentElement;
-    const isLight = root.classList.contains("light");
-    setThemeState(isLight ? "light" : "dark");
-  }, []);
+    root.classList.remove("light", "dark");
+    root.classList.add(newTheme);
+    root.style.colorScheme = newTheme;
 
-  // 3. Listen for theme changes initiated by the user
-  useEffect(() => {
-    if (!mounted) return; // Skip during SSR to prevent hydration errors
+    // 2. Update React State
+    setThemeState(newTheme);
 
-    const root = document.documentElement;
-    root.classList.toggle("light", theme === "light");
-    root.classList.toggle("dark", theme === "dark");
-    root.style.colorScheme = theme;
+    // 3. Save to a 1-year cookie so the server can read it on the next page load
+    document.cookie = `nara:theme=${newTheme}; path=/; max-age=31536000`;
+  };
 
-    try {
-      localStorage.setItem(STORAGE_KEY, theme);
-    } catch {
-      // Ignore write errors (e.g., incognito mode restrictions)
-    }
-  }, [theme, mounted]);
+  const toggleTheme = () => setTheme(theme === "dark" ? "light" : "dark");
 
   return (
-    <Ctx.Provider
-      value={{
-        theme,
-        setTheme: setThemeState,
-        toggle: () => setThemeState((t) => (t === "dark" ? "light" : "dark")),
-      }}
-    >
+    <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>
       {children}
-    </Ctx.Provider>
+    </ThemeContext.Provider>
   );
 }
 
 export function useTheme() {
-  const v = useContext(Ctx);
-  if (!v) throw new Error("useTheme must be used inside <ThemeProvider />");
-  return v;
+  const context = useContext(ThemeContext);
+  if (!context) throw new Error("useTheme must be used inside <ThemeProvider />");
+  return context;
 }
-
-// Inline script string — runs before hydration to prevent flash.
-export const themeInitScript = `(function(){try{var k='${STORAGE_KEY}';var s=localStorage.getItem(k);var t=s==='light'||s==='dark'?s:'dark';var r=document.documentElement;r.classList.toggle('light',t==='light');r.classList.toggle('dark',t==='dark');r.style.colorScheme=t;}catch(e){document.documentElement.classList.add('dark');}})();`;

@@ -1,29 +1,27 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
-import { getLandingData, type LandingData } from "./bayse.functions";
+import { useState, useEffect } from "react";
+import { getLandingData, type LandingData } from "./bayse.function";
 
-export function useLandingData(initialData?: LandingData) {
-  const query = useQuery({
-    queryKey: ["nara", "landing"],
-    // In Next.js, this queryFn will only fire on the client for the 30s refetches
-    queryFn: () => getLandingData(), 
-    
-    // 1. INJECT SERVER DATA: This guarantees instant zero-layout-shift first paints
-    initialData, 
-    
-    // 2. POLLING CONFIG: Pull a fresh Bayse snapshot every 30s
-    staleTime: 25_000,
-    gcTime: 5 * 60_000,
-    refetchInterval: 30_000,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
-    
-    // 3. RETRY CONFIG: Client-side exponential backoff
-    retry: 2,
-    retryDelay: (attempt) => Math.min(1000 * 2 ** attempt, 8000),
-  });
+export function useLandingData(initialData: LandingData) {
+  // 1. Initialize state with the data fetched instantly by the Next.js server
+  const [data, setData] = useState<LandingData>(initialData);
 
-  // If initialData is provided by the server, query.data will never be undefined
-  return query.data as LandingData; 
+  useEffect(() => {
+    // 2. Set up a native browser interval to poll Bayse every 30 seconds
+    const interval = setInterval(async () => {
+      try {
+        const freshData = await getLandingData();
+        setData(freshData);
+      } catch (error) {
+        // Silently catch errors so the UI doesn't break if the network blips
+        console.error("Failed to fetch live market data:", error);
+      }
+    }, 30_000);
+
+    // 3. Clean up the interval if the user leaves the page
+    return () => clearInterval(interval);
+  }, []);
+
+  return data;
 }

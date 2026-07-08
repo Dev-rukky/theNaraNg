@@ -14,6 +14,7 @@ import { useLandingData } from "@/lib/nara/uselandingdata";
 import { BrowserMockup, DataLabel, LiveDot, OddsBar } from "./primitives";
 import { fmtVol } from "@/lib/nara/format";
 import { cn } from "@/lib/utils";
+import type { LandingData } from "@/lib/nara/bayse.function";
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -33,10 +34,11 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
 }
 
 export function DashboardMockup({
-    initialData, 
-    compact = false, 
-    className = ""
+  initialData, // <-- Add this
+  compact = false,
+  className = "",
 }: {
+  initialData: LandingData; // <-- Add this type
   compact?: boolean;
   className?: string;
 }) {
