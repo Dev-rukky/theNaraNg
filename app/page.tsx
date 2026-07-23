@@ -5,6 +5,9 @@ import { MarketTicker } from "@/components/nara/marketTicker";
 import { ProductBento } from "@/components/nara/products";
 import { SignalTimeline } from "@/components/nara/signalTimeline";
 import { SocialProof } from "@/components/nara/socialProof";
+import { NewsletterCTA } from "@/components/nara/newsletter";
+import { PricingSection } from "@/components/nara/pricingSection";
+import { Footer } from "@/components/nara/footer";
 
 export default async function HomePage() {
   // 1. Fetch the data on the SERVER. This is instantly rendered into the HTML.
@@ -19,7 +22,9 @@ export default async function HomePage() {
       <ProductBento initialData={initialLandingData} />
       <SignalTimeline />
       <SocialProof initialData={initialLandingData} />
-      
+      <NewsletterCTA />
+      <PricingSection />
+      <Footer />
     </main>
   );
 }
