@@ -4,6 +4,101 @@ import { unstable_cache } from "next/cache";
 import { MARKETS, STATS, TICKER, USDNGN_HISTORY } from "./mock";
 import { bayseFetch } from "./bayse-client";
 
+/* ============================================================
+   0. GLOBAL PROTECTION LAYER
+   These three primitives are the actual fix for "hammering the
+   API / getting the IP banned." unstable_cache alone does NOT
+   protect you on serverless: each warm instance/region keeps its
+   own cache, so under real traffic many instances can all get a
+   simultaneous cache miss and all fire requests at once. These
+   three things bound that blast radius regardless of instance
+   count or traffic spikes.
+   ============================================================ */
+
+// 0a. Concurrency limiter — hard cap on simultaneous outbound
+// calls to Bayse from this process, no matter how many callers
+// (pagination loop, Promise.all over events, etc.) want to fire.
+function createLimiter(concurrency: number) {
+  let active = 0;
+  const queue: Array<() => void> = [];
+  const pump = () => {
+    if (active >= concurrency || queue.length === 0) return;
+    active++;
+    const job = queue.shift()!;
+    job();
+  };
+  return function limit<T>(fn: () => Promise<T>): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      queue.push(() => {
+        fn()
+          .then(resolve, reject)
+          .finally(() => {
+            active--;
+            pump();
+          });
+      });
+      pump();
+    });
+  };
+}
+// Tune this to whatever Bayse's documented rate limit actually allows.
+// 4 concurrent is a conservative default.
+const bayseLimit = createLimiter(4);
+
+// 0b. Request coalescing — if two callers ask for the exact same
+// resource while a fetch is already in flight, the second one
+// awaits the first instead of firing a duplicate network call.
+// This is what the old getEventHistory implementation was missing
+// (it created a fresh unstable_cache per call, so nothing coalesced).
+const inflight = new Map<string, Promise<unknown>>();
+function coalesce<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const existing = inflight.get(key) as Promise<T> | undefined;
+  if (existing) return existing;
+  const p = fn().finally(() => inflight.delete(key));
+  inflight.set(key, p);
+  return p;
+}
+
+// 0c. Circuit breaker — if Bayse starts rate-limiting us (429) or
+// erroring hard, stop calling it entirely for a cooldown window
+// instead of retrying politely on every incoming request. This is
+// the difference between "briefly degraded" and "got IP banned."
+let breakerOpenUntil = 0;
+function breakerIsOpen(): boolean {
+  return Date.now() < breakerOpenUntil;
+}
+function tripBreaker(ms = 60_000) {
+  breakerOpenUntil = Date.now() + ms;
+  console.warn(`[bayse] circuit breaker tripped for ${ms}ms`);
+}
+function looksLikeRateLimit(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /429|rate.?limit|too many requests/i.test(msg);
+}
+
+// All outbound Bayse calls should route through this wrapper so the
+// limiter + breaker apply uniformly, no matter which function calls it.
+async function guardedBayseFetch<T>(
+  path: string,
+  opts: Parameters<typeof bayseFetch>[1],
+): Promise<T> {
+  if (breakerIsOpen()) {
+    throw new Error("bayse circuit breaker open — skipping call");
+  }
+  return bayseLimit(async () => {
+    try {
+      return await bayseFetch<T>(path, opts);
+    } catch (err) {
+      if (looksLikeRateLimit(err)) tripBreaker();
+      throw err;
+    }
+  });
+}
+
+/* ============================================================
+   1. Types (unchanged)
+   ============================================================ */
+
 type BayseMarket = {
   id: string;
   title: string;
@@ -46,34 +141,29 @@ type BaysePriceHistory = {
   markets: { marketId: string; title: string; priceHistory: BaysePricePoint[] }[];
 };
 
-type BayseTrade = {
-  id: string;
-  marketId: string;
-  size: number;
-  takerPrice: number;
-  createdAt: string;
-};
+type BayseTrade = { id: string; marketId: string; size: number; takerPrice: number; createdAt: string };
 type BayseTradesResponse = {
   data: BayseTrade[];
   pagination: { page: number; size: number; totalCount: number; lastPage: number };
 };
 
-// 1. Next.js Cached Helpers
+/* ============================================================
+   2. Cached rolling volume
+   Revalidate window widened 300s -> 600s: this is a coarse rollup
+   stat, it does not need to be fresher than ~10 minutes.
+   ============================================================ */
+
 const getCachedRolling7dNotional = unstable_cache(
   async (): Promise<number> => {
     const fromDate = new Date(Date.now() - 7 * 24 * 3600 * 1000).toISOString();
     try {
-      const res = await bayseFetch<BayseTradesResponse>(
+      const res = await guardedBayseFetch<BayseTradesResponse>(
         `/pm/trades?perPage=50&fromDate=${encodeURIComponent(fromDate)}`,
-        { attempts: 2, baseMs: 200, timeoutMs: 5000, integration: "list-events" },
+        { attempts: 2, baseMs: 400, timeoutMs: 5000, integration: "list-events" },
       );
       const sample = res.data ?? [];
       if (!sample.length || !res.pagination?.totalCount) return 0;
-      
-      const avg =
-        sample.reduce((s, t) => s + (t.size || 0) * (t.takerPrice || 0), 0) /
-        sample.length;
-        
+      const avg = sample.reduce((s, t) => s + (t.size || 0) * (t.takerPrice || 0), 0) / sample.length;
       return Math.max(0, Math.round(avg * res.pagination.totalCount));
     } catch (err) {
       console.error("[bayse] trades volume rollup failed:", err);
@@ -81,73 +171,35 @@ const getCachedRolling7dNotional = unstable_cache(
     }
   },
   ["bayse-rolling-volume"],
-  { revalidate: 300 }
+  { revalidate: 600 },
 );
 
-export type LandingMarket = {
-  id: string;
-  slug: string;
-  name: string;
-  yes: number;
-  delta: number;
-  volume: number;
-  resolves: string;
-};
-
+export type LandingMarket = { id: string; slug: string; name: string; yes: number; delta: number; volume: number; resolves: string };
 export type HistoryPoint = { t: string; crowd: number };
-
 export type LandingData = {
   markets: LandingMarket[];
   ticker: { name: string; yes: number; delta: number }[];
   history: HistoryPoint[];
-  featured: {
-    id: string;
-    slug: string;
-    title: string;
-    yes: number;
-    delta: number;
-  };
-  stats: {
-    volume: number;
-    markets: number;
-    sharpest: number;
-    resolvingSoon: number;
-    accuracy: number;
-  };
+  featured: { id: string; slug: string; title: string; yes: number; delta: number };
+  stats: { volume: number; markets: number; sharpest: number; resolvingSoon: number; accuracy: number };
   asOf: string;
   source: "bayse" | "mock";
   degraded: boolean;
   degradedReason?: string;
 };
 
-// 2. The Internal Logic
+/* ============================================================
+   3. Helpers (unchanged logic, just calling guardedBayseFetch)
+   ============================================================ */
+
 function buildMockLanding(reason: string): LandingData {
-  const markets: LandingMarket[] = MARKETS.map((m) => ({
-    id: m.id,
-    slug: m.id,
-    name: m.name,
-    yes: m.yes,
-    delta: m.delta,
-    volume: m.volume,
-    resolves: m.resolves,
-  }));
+  const markets: LandingMarket[] = MARKETS.map((m) => ({ id: m.id, slug: m.id, name: m.name, yes: m.yes, delta: m.delta, volume: m.volume, resolves: m.resolves }));
   const ticker = TICKER.map((t) => ({ name: t.name, yes: t.yes, delta: t.delta }));
-  const history: HistoryPoint[] = USDNGN_HISTORY.map((p) => ({
-    t: p.t,
-    crowd: p.crowd,
-  }));
+  const history: HistoryPoint[] = USDNGN_HISTORY.map((p) => ({ t: p.t, crowd: p.crowd }));
   const featured = MARKETS[0];
   return {
-    markets,
-    ticker,
-    history,
-    featured: {
-      id: featured.id,
-      slug: featured.id,
-      title: featured.name,
-      yes: featured.yes,
-      delta: featured.delta,
-    },
+    markets, ticker, history,
+    featured: { id: featured.id, slug: featured.id, title: featured.name, yes: featured.yes, delta: featured.delta },
     stats: { ...STATS },
     asOf: new Date().toISOString(),
     source: "mock",
@@ -160,13 +212,7 @@ function fmtResolve(iso?: string): string {
   if (!iso) return "TBA";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "TBA";
-  return d.toLocaleString("en-NG", {
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone: "Africa/Lagos",
-  }) + " WAT";
+  return d.toLocaleString("en-NG", { weekday: "short", hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Africa/Lagos" }) + " WAT";
 }
 
 function pickPrimaryMarket(ev: BayseEvent): BayseMarket | undefined {
@@ -182,25 +228,25 @@ function scoreFeatured(ev: BayseEvent): number {
   return s;
 }
 
-async function fetchPriceHistory(
-  eventId: string,
-  timePeriod: "12H" | "24H" | "1W" | "1M" = "24H",
-): Promise<BaysePriceHistory | null> {
-  try {
-    return await bayseFetch<BaysePriceHistory>(
-      `/pm/events/${eventId}/price-history?timePeriod=${timePeriod}&outcome=YES`,
-      { attempts: 2, baseMs: 200, timeoutMs: 4000, integration: "price-history" },
-    );
-  } catch {
-    return null;
-  }
+// Coalesced + limited + breaker-protected. Multiple concurrent callers
+// asking for the same eventId+timePeriod share one network call.
+async function fetchPriceHistory(eventId: string, timePeriod: "12H" | "24H" | "1W" | "1M" = "24H"): Promise<BaysePriceHistory | null> {
+  const key = `ph:${eventId}:${timePeriod}`;
+  return coalesce(key, async () => {
+    try {
+      return await guardedBayseFetch<BaysePriceHistory>(
+        `/pm/events/${eventId}/price-history?timePeriod=${timePeriod}&outcome=YES`,
+        { attempts: 2, baseMs: 400, timeoutMs: 4000, integration: "price-history" },
+      );
+    } catch {
+      return null;
+    }
+  });
 }
 
 function computeDelta(history: BaysePriceHistory | null, marketId?: string): number {
   if (!history || !history.markets?.length) return 0;
-  const m = marketId
-    ? history.markets.find((x) => x.marketId === marketId) ?? history.markets[0]
-    : history.markets[0];
+  const m = marketId ? history.markets.find((x) => x.marketId === marketId) ?? history.markets[0] : history.markets[0];
   const pts = m?.priceHistory ?? [];
   if (pts.length < 2) return 0;
   const first = pts[0].p;
@@ -209,14 +255,9 @@ function computeDelta(history: BaysePriceHistory | null, marketId?: string): num
   return ((last - first) / first) * 100;
 }
 
-function historyToSeries(
-  history: BaysePriceHistory | null,
-  marketId?: string,
-): HistoryPoint[] {
+function historyToSeries(history: BaysePriceHistory | null, marketId?: string): HistoryPoint[] {
   if (!history || !history.markets?.length) return [];
-  const m = marketId
-    ? history.markets.find((x) => x.marketId === marketId) ?? history.markets[0]
-    : history.markets[0];
+  const m = marketId ? history.markets.find((x) => x.marketId === marketId) ?? history.markets[0] : history.markets[0];
   const pts = m?.priceHistory ?? [];
   if (!pts.length) return [];
   const step = Math.max(1, Math.floor(pts.length / 24));
@@ -224,38 +265,30 @@ function historyToSeries(
   for (let i = 0; i < pts.length; i += step) {
     const p = pts[i];
     const d = new Date(p.e);
-    const label = d.toLocaleTimeString("en-NG", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-      timeZone: "Africa/Lagos",
-    });
-    out.push({ t: label, crowd: Number((p.p * 100).toFixed(2)) });
+    out.push({ t: d.toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Africa/Lagos" }), crowd: Number((p.p * 100).toFixed(2)) });
   }
   const last = pts[pts.length - 1];
   if (out[out.length - 1]?.crowd !== Number((last.p * 100).toFixed(2))) {
     const d = new Date(last.e);
-    out.push({
-      t: d.toLocaleTimeString("en-NG", {
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-        timeZone: "Africa/Lagos",
-      }),
-      crowd: Number((last.p * 100).toFixed(2)),
-    });
+    out.push({ t: d.toLocaleTimeString("en-NG", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Africa/Lagos" }), crowd: Number((last.p * 100).toFixed(2)) });
   }
   return out;
 }
 
-// 3. Cached Data Fetchers (The Shield)
+/* ============================================================
+   4. Landing data
+   Changes: revalidate 30 -> 60, topEvents 8 -> 6, price-history
+   fan-out now goes through the shared limiter so it never exceeds
+   4 concurrent calls no matter how many events are in scope.
+   ============================================================ */
+
 const fetchAndBuildLandingData = unstable_cache(
   async (): Promise<LandingData> => {
     const path = `/pm/events?currency=NGN&perPage=30&page=1&status=open`;
     let payload: BayseEventsResponse;
-    
+
     try {
-      payload = await bayseFetch<BayseEventsResponse>(path, { integration: "list-events" });
+      payload = await guardedBayseFetch<BayseEventsResponse>(path, { integration: "list-events" });
     } catch (err) {
       const reason = err instanceof Error ? err.message : "unknown error";
       console.error("[bayse] list-events failed after retries:", reason);
@@ -268,18 +301,20 @@ const fetchAndBuildLandingData = unstable_cache(
     const ranked = [...events].sort((a, b) => scoreFeatured(b) - scoreFeatured(a));
     const featuredEv = ranked[0];
     const featuredMarket = featuredEv ? pickPrimaryMarket(featuredEv) : undefined;
-    
-    const topEvents = [...events].sort((a, b) => (b.totalVolume ?? 0) - (a.totalVolume ?? 0)).slice(0, 8);
+
+    // Trimmed from 8 -> 6. Fewer events tracked on the landing page
+    // means fewer price-history calls every regeneration cycle.
+    const topEvents = [...events].sort((a, b) => (b.totalVolume ?? 0) - (a.totalVolume ?? 0)).slice(0, 6);
 
     const ids = new Set<string>();
     topEvents.forEach((e) => ids.add(e.id));
     if (featuredEv) ids.add(featuredEv.id);
 
+    // Promise.all here is safe now: fetchPriceHistory is internally
+    // limited to 4 concurrent + coalesced, so this can't spike to
+    // N simultaneous outbound requests regardless of ids.size.
     const histArr = await Promise.all(
-      Array.from(ids).map(async (id) => {
-        const h = await fetchPriceHistory(id, id === featuredEv?.id ? "1W" : "24H");
-        return [id, h] as const;
-      }),
+      Array.from(ids).map(async (id) => [id, await fetchPriceHistory(id, id === featuredEv?.id ? "1W" : "24H")] as const),
     );
     const histMap = new Map(histArr);
 
@@ -287,11 +322,7 @@ const fetchAndBuildLandingData = unstable_cache(
       const pm = pickPrimaryMarket(ev);
       const yes = pm ? pm.outcome1Price * 100 : 0;
       const delta = computeDelta(histMap.get(ev.id) ?? null, pm?.id);
-      return {
-        id: ev.id, slug: ev.slug, name: ev.title, yes: Number(yes.toFixed(1)),
-        delta: Number(delta.toFixed(1)), volume: Math.round(ev.totalVolume ?? 0),
-        resolves: fmtResolve(ev.closingDate ?? ev.resolutionDate),
-      };
+      return { id: ev.id, slug: ev.slug, name: ev.title, yes: Number(yes.toFixed(1)), delta: Number(delta.toFixed(1)), volume: Math.round(ev.totalVolume ?? 0), resolves: fmtResolve(ev.closingDate ?? ev.resolutionDate) };
     });
 
     const ticker = markets.map((m) => ({ name: m.name, yes: m.yes, delta: m.delta }));
@@ -304,7 +335,7 @@ const fetchAndBuildLandingData = unstable_cache(
       events.reduce((s, e) => s + (e.totalVolume ?? 0), 0),
       await getCachedRolling7dNotional(),
     ];
-    
+
     const volume = sevenDayVolume > 0 ? sevenDayVolume : Math.round(totalVolume);
     const now = Date.now();
     const weekMs = 7 * 24 * 3600 * 1000;
@@ -316,61 +347,54 @@ const fetchAndBuildLandingData = unstable_cache(
 
     return {
       markets, ticker: ticker.length ? ticker : [], history,
-      featured: {
-        id: featuredEv?.id ?? "", slug: featuredEv?.slug ?? "", title: featuredEv?.title ?? "—",
-        yes: Number(featuredYes.toFixed(1)), delta: Number(featuredDelta.toFixed(1)),
-      },
+      featured: { id: featuredEv?.id ?? "", slug: featuredEv?.slug ?? "", title: featuredEv?.title ?? "—", yes: Number(featuredYes.toFixed(1)), delta: Number(featuredDelta.toFixed(1)) },
       stats: { volume, markets: events.length, sharpest: Number(sharpest.toFixed(1)), resolvingSoon, accuracy: 73.4 },
       asOf: new Date().toISOString(), source: "bayse", degraded: false,
     };
   },
-  ["bayse-landing-data"], 
-  { revalidate: 30 } 
+  ["bayse-landing-data"],
+  { revalidate: 60 },
 );
 
-// 4. Exported Server Actions
 export async function getLandingData(): Promise<LandingData> {
-  return fetchAndBuildLandingData(); 
+  return fetchAndBuildLandingData();
 }
+
+/* ============================================================
+   5. Event history — FIXED
+   The original created a brand-new unstable_cache instance on
+   every call, which defeats caching/coalescing entirely for
+   concurrent requests to the same event+range. Hoisted to module
+   scope and parameterized instead — Next.js incorporates the
+   serializable arguments into the cache key automatically.
+   ============================================================ */
 
 export type HistoryRange = "1W" | "1M";
 
+const getCachedEventHistory = unstable_cache(
+  async (eventId: string, range: HistoryRange) => fetchPriceHistory(eventId, range),
+  ["bayse-event-history"],
+  { revalidate: 120 },
+);
+
 export async function getEventHistory(data: { eventId: string; range?: HistoryRange }): Promise<HistoryPoint[]> {
   const range: HistoryRange = data.range ?? "1W";
-  const getCachedHistory = unstable_cache(
-    async () => fetchPriceHistory(data.eventId, range),
-    [`bayse-history-${data.eventId}-${range}`],
-    { revalidate: 60 } 
-  );
-  
-  const h = await getCachedHistory();
+  const h = await getCachedEventHistory(data.eventId, range);
   return historyToSeries(h);
 }
 
+/* ============================================================
+   6. All markets
+   Changes: revalidate 30 -> 90, topForDelta 30 -> 12, pagination
+   loop now runs through guardedBayseFetch (limiter + breaker
+   apply), and price-history fan-out is bounded the same way as
+   the landing page.
+   ============================================================ */
+
 export type MarketStatus = "active" | "resolving_soon" | "resolved";
 export type MarketCategory = "naira" | "cbn" | "sports" | "politics" | "crypto" | "world";
-
-export type AllMarketsRow = {
-  id: string;
-  slug: string;
-  name: string;
-  category: MarketCategory | "other";
-  yes: number;
-  delta: number;
-  volume: number;
-  resolves: string;
-  resolvesAt: number;
-  status: MarketStatus;
-};
-
-export type AllMarketsData = {
-  rows: AllMarketsRow[];
-  total: number;
-  asOf: string;
-  source: "bayse" | "mock";
-  degraded: boolean;
-  degradedReason?: string;
-};
+export type AllMarketsRow = { id: string; slug: string; name: string; category: MarketCategory | "other"; yes: number; delta: number; volume: number; resolves: string; resolvesAt: number; status: MarketStatus };
+export type AllMarketsData = { rows: AllMarketsRow[]; total: number; asOf: string; source: "bayse" | "mock"; degraded: boolean; degradedReason?: string };
 
 function categorize(ev: BayseEvent): MarketCategory | "other" {
   const hay = `${ev.title} ${ev.category ?? ""} ${ev.description ?? ""}`.toLowerCase();
@@ -396,19 +420,28 @@ const fetchAndBuildAllMarkets = unstable_cache(
     const events: BayseEvent[] = [];
     let degraded = false;
     let reason: string | undefined;
-    
+
     try {
-      for (let page = 1; page <= MAX_PAGES; page++) {
-        const path = `/pm/events?currency=NGN&perPage=${PER_PAGE}&page=${page}&status=open`;
-        const payload = await bayseFetch<BayseEventsResponse>(path, {
-          integration: "list-events",
-          attempts: 2,
-          timeoutMs: 6000,
-        });
-        const batch = payload?.events ?? [];
-        events.push(...batch);
-        const last = payload?.pagination?.lastPage ?? page;
-        if (page >= last || batch.length < PER_PAGE) break;
+      // Fetch page 1 first to learn lastPage, then fetch the rest
+      // through the shared limiter — still bounded to 4 concurrent
+      // even though this now overlaps with price-history calls below.
+      const first = await guardedBayseFetch<BayseEventsResponse>(
+        `/pm/events?currency=NGN&perPage=${PER_PAGE}&page=1&status=open`,
+        { integration: "list-events", attempts: 2, timeoutMs: 6000 },
+      );
+      events.push(...(first?.events ?? []));
+      const lastPage = Math.min(first?.pagination?.lastPage ?? 1, MAX_PAGES);
+
+      if (lastPage > 1 && (first?.events?.length ?? 0) >= PER_PAGE) {
+        const rest = await Promise.all(
+          Array.from({ length: lastPage - 1 }, (_, i) => i + 2).map((page) =>
+            guardedBayseFetch<BayseEventsResponse>(
+              `/pm/events?currency=NGN&perPage=${PER_PAGE}&page=${page}&status=open`,
+              { integration: "list-events", attempts: 2, timeoutMs: 6000 },
+            ),
+          ),
+        );
+        rest.forEach((p) => events.push(...(p?.events ?? [])));
       }
     } catch (err) {
       degraded = true;
@@ -418,22 +451,20 @@ const fetchAndBuildAllMarkets = unstable_cache(
 
     if (!events.length) {
       const mock = buildMockLanding(reason ?? "Bayse returned no markets");
-      const rows: AllMarketsRow[] = mock.markets.map((m) => ({
-        id: m.id, slug: m.slug, name: m.name, category: "other" as const,
-        yes: m.yes, delta: m.delta, volume: m.volume, resolves: m.resolves,
-        resolvesAt: 0, status: "active" as const,
-      }));
+      const rows: AllMarketsRow[] = mock.markets.map((m) => ({ id: m.id, slug: m.slug, name: m.name, category: "other" as const, yes: m.yes, delta: m.delta, volume: m.volume, resolves: m.resolves, resolvesAt: 0, status: "active" as const }));
       return { rows, total: rows.length, asOf: new Date().toISOString(), source: "mock", degraded: true, degradedReason: reason ?? "mock fallback" };
     }
 
     const now = Date.now();
     const open = events.filter((e) => e.markets?.length);
 
-    const topForDelta = [...open].sort((a, b) => (b.totalVolume ?? 0) - (a.totalVolume ?? 0)).slice(0, 30);
-    
-    const histArr = await Promise.all(
-      topForDelta.map(async (e) => [e.id, await fetchPriceHistory(e.id, "24H")] as const),
-    );
+    // Trimmed from 30 -> 12. This was the single biggest source of
+    // call volume: 30 concurrent price-history requests on every
+    // 30s cache miss. 12 events covers the visible "movers" list
+    // without needing deltas for the long tail of low-volume markets.
+    const topForDelta = [...open].sort((a, b) => (b.totalVolume ?? 0) - (a.totalVolume ?? 0)).slice(0, 12);
+
+    const histArr = await Promise.all(topForDelta.map(async (e) => [e.id, await fetchPriceHistory(e.id, "24H")] as const));
     const histMap = new Map(histArr);
 
     const rows: AllMarketsRow[] = open.map((ev) => {
@@ -445,18 +476,13 @@ const fetchAndBuildAllMarkets = unstable_cache(
       const liq = Math.round(ev.liquidity ?? 0);
       const orderProxy = (ev.totalOrders ?? 0) * 500;
       const volume = Math.max(Math.round(ev.totalVolume ?? 0), liq, orderProxy);
-      
-      return {
-        id: ev.id, slug: ev.slug, name: ev.title, category: categorize(ev),
-        yes: Number(yes.toFixed(1)), delta: Number(delta.toFixed(1)), volume,
-        resolves: fmtResolve(closeIso), resolvesAt: closeMs, status: statusOf(ev, closeMs, now),
-      };
+      return { id: ev.id, slug: ev.slug, name: ev.title, category: categorize(ev), yes: Number(yes.toFixed(1)), delta: Number(delta.toFixed(1)), volume, resolves: fmtResolve(closeIso), resolvesAt: closeMs, status: statusOf(ev, closeMs, now) };
     });
 
     return { rows, total: rows.length, asOf: new Date().toISOString(), source: "bayse", degraded, degradedReason: reason };
   },
   ["bayse-all-markets"],
-  { revalidate: 30 }
+  { revalidate: 90 },
 );
 
 export async function getAllMarkets(): Promise<AllMarketsData> {
