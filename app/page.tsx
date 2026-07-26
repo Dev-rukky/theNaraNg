@@ -10,13 +10,11 @@ import { PricingSection } from "@/components/nara/pricingSection";
 import { Footer } from "@/components/nara/footer";
 
 export default async function HomePage() {
-  // 1. Fetch the data on the SERVER. This is instantly rendered into the HTML.
   const initialLandingData = await getLandingData();
 
   return (
     <main>
       <Navbar />
-      {/* 2. Pass the server data down to your client components */}
       <Hero initialData={initialLandingData} />
       <MarketTicker initialData={initialLandingData} />
       <ProductBento initialData={initialLandingData} />

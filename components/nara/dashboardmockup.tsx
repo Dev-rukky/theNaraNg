@@ -16,7 +16,15 @@ import { fmtVol } from "@/lib/nara/format";
 import { cn } from "@/lib/utils";
 import type { LandingData } from "@/lib/nara/bayse.function";
 
-function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+function Stat({
+  label,
+  value,
+  sub,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+}) {
   return (
     <div className="flex flex-col gap-1 border-r border-nara-border px-4 py-3 last:border-r-0">
       <span className="font-mono text-[10px] uppercase tracking-widest text-nara-muted">
@@ -28,41 +36,43 @@ function Stat({ label, value, sub }: { label: string; value: string; sub?: strin
       >
         {value}
       </span>
-      {sub && <span className="font-mono text-[10px] text-nara-muted">{sub}</span>}
+      {sub && (
+        <span className="font-mono text-[10px] text-nara-muted">{sub}</span>
+      )}
     </div>
   );
 }
 
 export function DashboardMockup({
-  initialData, // <-- Add this
+  initialData,
   compact = false,
   className = "",
 }: {
-  initialData: LandingData; // <-- Add this type
+  initialData: LandingData;
   compact?: boolean;
   className?: string;
 }) {
   const { markets, stats, history, featured } = useLandingData(initialData);
 
-  
-  // Prevent hydration mismatches by ensuring client-side rendering for data that might 
-  // differ from the server's initial HTML (especially for randomized or live API mock data).
   const [mounted, setMounted] = useState(false);
-  
+
   useEffect(() => {
     setMounted(true);
   }, []);
 
   const chartData = mounted && history.length ? history : [];
   const yesValues = chartData.map((p) => p.crowd);
-  const yMin = yesValues.length ? Math.max(0, Math.floor(Math.min(...yesValues) - 5)) : 0;
-  const yMax = yesValues.length ? Math.min(100, Math.ceil(Math.max(...yesValues) + 5)) : 100;
+  const yMin = yesValues.length
+    ? Math.max(0, Math.floor(Math.min(...yesValues) - 5))
+    : 0;
+  const yMax = yesValues.length
+    ? Math.min(100, Math.ceil(Math.max(...yesValues) + 5))
+    : 100;
   const deltaColor = featured.delta >= 0 ? "text-nara-green" : "text-nara-red";
   const deltaSign = featured.delta >= 0 ? "+" : "";
 
   return (
     <BrowserMockup url="nara.ng/markets" className={className}>
-      {/* Topbar */}
       <div className="flex items-center justify-between border-b border-nara-border px-5 py-3">
         <div className="flex items-center gap-6">
           <span className="font-sans text-[13px] font-semibold tracking-tight">
@@ -78,10 +88,13 @@ export function DashboardMockup({
         <LiveDot />
       </div>
 
-      {/* Stats Row */}
       <div className="grid grid-cols-2 border-b border-nara-border sm:grid-cols-4">
         <Stat label="Volume" value={fmtVol(stats.volume)} sub="rolling 7d" />
-        <Stat label="Markets" value={String(stats.markets)} sub="open on Bayse" />
+        <Stat
+          label="Markets"
+          value={String(stats.markets)}
+          sub="open on Bayse"
+        />
         <Stat
           label="Sharpest"
           value={`${stats.sharpest >= 0 ? "+" : ""}${stats.sharpest}%`}
@@ -94,7 +107,6 @@ export function DashboardMockup({
         />
       </div>
 
-      {/* Main Grid: Chart & Market List */}
       <div
         className={cn(
           "grid gap-0 md:grid-cols-5",
@@ -119,29 +131,47 @@ export function DashboardMockup({
             </div>
             <span className="nara-amber-dot" />
           </div>
-          
+
           <div className={cn("w-full", compact ? "h-[140px]" : "h-[200px]")}>
-            {/* Recharts requires a client-side environment to measure its container size */}
             {mounted ? (
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={chartData} margin={{ top: 8, right: 8, left: -22, bottom: 0 }}>
+                <AreaChart
+                  data={chartData}
+                  margin={{ top: 8, right: 8, left: -22, bottom: 0 }}
+                >
                   <defs>
                     <linearGradient id="amberFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#EF9F27" stopOpacity={0.35} />
+                      <stop
+                        offset="0%"
+                        stopColor="#EF9F27"
+                        stopOpacity={0.35}
+                      />
                       <stop offset="100%" stopColor="#EF9F27" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid stroke="#2A2A38" strokeOpacity={0.4} vertical={false} />
+                  <CartesianGrid
+                    stroke="#2A2A38"
+                    strokeOpacity={0.4}
+                    vertical={false}
+                  />
                   <XAxis
                     dataKey="t"
-                    tick={{ fill: "#8A8490", fontSize: 10, fontFamily: "Geist Mono" }}
+                    tick={{
+                      fill: "#8A8490",
+                      fontSize: 10,
+                      fontFamily: "Geist Mono",
+                    }}
                     axisLine={{ stroke: "#2A2A38" }}
                     tickLine={false}
                     minTickGap={24}
                   />
                   <YAxis
                     domain={[yMin, yMax]}
-                    tick={{ fill: "#8A8490", fontSize: 10, fontFamily: "Geist Mono" }}
+                    tick={{
+                      fill: "#8A8490",
+                      fontSize: 10,
+                      fontFamily: "Geist Mono",
+                    }}
                     axisLine={false}
                     tickLine={false}
                   />
@@ -167,20 +197,20 @@ export function DashboardMockup({
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
-              // A skeleton/placeholder to maintain layout height during SSR
               <div className="h-full w-full bg-nara-surface2/20 animate-pulse rounded-md" />
             )}
           </div>
         </div>
 
-        {/* Market List */}
         <div className="p-5 md:col-span-2">
           <DataLabel>Top Markets</DataLabel>
           <ul className="mt-3 space-y-3">
             {markets.slice(0, compact ? 4 : 6).map((m) => (
               <li key={m.id} className="space-y-1.5">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="truncate text-[12px] text-nara-text">{m.name}</span>
+                  <span className="truncate text-[12px] text-nara-text">
+                    {m.name}
+                  </span>
                   <span className="font-mono text-[12px] font-semibold text-nara-amber tabular-nums">
                     {m.yes.toFixed(1)}%
                   </span>

@@ -2,7 +2,7 @@
 
 import { useRef } from "react";
 import Link from "next/link";
-import { gsap, useGSAP } from "@/lib/nara/gsap"; // Pointing to our new clean GSAP file
+import { gsap, useGSAP } from "@/lib/nara/gsap";
 import { AmberButton, DataLabel } from "./primitives";
 import { DashboardMockup } from "./dashboardmockup";
 import type { LandingData } from "@/lib/nara/bayse.function";
@@ -10,31 +10,52 @@ import type { LandingData } from "@/lib/nara/bayse.function";
 export function Hero({ initialData }: { initialData: LandingData }) {
   const container = useRef<HTMLElement>(null);
 
-  // 2. Use the official hook, passing the container ref as the scope
-  useGSAP(() => {
-    const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
-    
-    tl.from(".hero-label", { y: 12, opacity: 0, duration: 0.6 }, 0.2)
-      .from(".hero-word", { y: 60, opacity: 0, stagger: 0.08, duration: 0.9, ease: "power4.out" }, 0.35)
-      .from(".hero-sub", { y: 16, opacity: 0, duration: 0.7 }, 0.85)
-      .from(".hero-cta", { y: 16, opacity: 0, stagger: 0.08, duration: 0.6 }, 1.0)
-      .from(".hero-proof", { opacity: 0, duration: 0.6 }, 1.25)
-      .from(".hero-mock", { y: 60, opacity: 0, duration: 1.1, ease: "power4.out" }, 1.0);
-  }, { scope: container });
+  useGSAP(
+    () => {
+      const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
+
+      tl.from(".hero-label", { y: 12, opacity: 0, duration: 0.6 }, 0.2)
+        .from(
+          ".hero-word",
+          {
+            y: 60,
+            opacity: 0,
+            stagger: 0.08,
+            duration: 0.9,
+            ease: "power4.out",
+          },
+          0.35,
+        )
+        .from(".hero-sub", { y: 16, opacity: 0, duration: 0.7 }, 0.85)
+        .from(
+          ".hero-cta",
+          { y: 16, opacity: 0, stagger: 0.08, duration: 0.6 },
+          1.0,
+        )
+        .from(".hero-proof", { opacity: 0, duration: 0.6 }, 1.25)
+        .from(
+          ".hero-mock",
+          { y: 60, opacity: 0, duration: 1.1, ease: "power4.out" },
+          1.0,
+        );
+    },
+    { scope: container },
+  );
 
   return (
     <section
       ref={container}
       className="relative isolate flex min-h-screen flex-col items-center justify-end overflow-hidden pt-32 pb-0"
     >
-      {/* Background utilities from your globals.css */}
       <div className="absolute inset-0 -z-10 nara-dot-grid opacity-60" />
       <div className="absolute inset-0 -z-10 nara-amber-glow" />
       <div className="absolute inset-x-0 top-1/2 -z-10 h-px bg-gradient-to-r from-transparent via-nara-border to-transparent" />
 
       <div className="mx-auto flex max-w-5xl flex-col items-center px-6 text-center">
         <div className="hero-label">
-          <DataLabel>// Nigeria's prediction market intelligence layer</DataLabel>
+          <DataLabel>
+            // Nigeria's prediction market intelligence layer
+          </DataLabel>
         </div>
 
         <h1 className="mt-6 max-w-4xl text-balance text-[44px] font-bold leading-[1.02] tracking-[-0.04em] sm:text-6xl md:text-7xl lg:text-[96px]">
@@ -49,13 +70,12 @@ export function Hero({ initialData }: { initialData: LandingData }) {
         </h1>
 
         <p className="hero-sub mt-7 max-w-xl text-pretty text-base text-nara-muted sm:text-lg md:text-xl">
-          Decode what Nigeria's traders believe about the Naira, the CBN, and the economy —
-          before it makes the news.
+          Decode what Nigeria's traders believe about the Naira, the CBN, and
+          the economy — before it makes the news.
         </p>
 
         <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
           <div className="hero-cta">
-            {/* If your AmberButton supports 'asChild' or polymorphic rendering, using next/link is preferred here */}
             <AmberButton variant="amber" size="lg" as={Link} href="#newsletter">
               Get early access →
             </AmberButton>
@@ -73,8 +93,7 @@ export function Hero({ initialData }: { initialData: LandingData }) {
       </div>
 
       <div className="hero-mock relative z-10 mx-auto mt-16 w-full max-w-6xl translate-y-20 px-6 sm:translate-y-24">
-        {/* 2. Pass it into the mockup */}
-        <DashboardMockup compact initialData={initialData} /> 
+        <DashboardMockup compact initialData={initialData} />
       </div>
     </section>
   );

@@ -19,11 +19,8 @@ export function Footer() {
           title="Product"
           items={["Dashboard", "Newsletter", "API", "Pricing"]}
         />
-        <FooterCol 
-          title="Company" 
-          items={["About", "Twitter", "nara.ng"]} 
-        />
-        
+        <FooterCol title="Company" items={["About", "Twitter", "nara.ng"]} />
+
         <div>
           <h4 className="font-mono text-[10px] uppercase tracking-widest text-nara-muted">
             Powered by
@@ -50,11 +47,12 @@ export function Footer() {
 function FooterCol({ title, items }: { title: string; items: string[] }) {
   return (
     <div>
-      <h4 className="font-mono text-[10px] uppercase tracking-widest text-nara-muted">{title}</h4>
+      <h4 className="font-mono text-[10px] uppercase tracking-widest text-nara-muted">
+        {title}
+      </h4>
       <ul className="mt-4 space-y-2 text-sm text-nara-text/90">
         {items.map((i) => (
           <li key={i}>
-            {/* Swapped standard <a> for Next.js <Link> for instant client-side routing */}
             <Link className="transition-colors hover:text-nara-amber" href="#">
               {i}
             </Link>

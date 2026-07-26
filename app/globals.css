@@ -1,4 +1,4 @@
-@import "tailwindcss" ;
+@import "tailwindcss";
 @import "tw-animate-css";
 
 @custom-variant dark (&:is(.dark *));
@@ -50,7 +50,7 @@
 :root {
   --radius: 0.625rem;
 
-  /* Nara palette — dark (default) */
+
   --nara-black: #0F0F14;
   --nara-surface: #16161E;
   --nara-surface2: #1E1E28;
@@ -62,7 +62,7 @@
   --nara-green: #1D9E75;
   --nara-red: #D85A30;
 
-  /* Map shadcn tokens to Nara palette */
+
   --background: var(--nara-black);
   --foreground: var(--nara-text);
   --card: var(--nara-surface);
@@ -84,7 +84,6 @@
   --ring: var(--nara-amber);
 }
 
-/* Light theme — warm paper. Brand amber/green/red darkened for contrast. */
 :root.light {
   --nara-black: #FAF7F0;
   --nara-surface: #FFFFFF;
@@ -102,9 +101,11 @@
   * {
     border-color: var(--color-border);
   }
+
   html {
     background-color: var(--background);
   }
+
   body {
     background-color: var(--background);
     color: var(--foreground);
@@ -112,22 +113,28 @@
     -webkit-font-smoothing: antialiased;
     font-feature-settings: "ss01", "cv11";
   }
+
   ::selection {
     background: var(--color-nara-amber);
     color: var(--color-nara-black);
   }
 }
 
-@utility text-balance { text-wrap: balance; }
-@utility text-pretty  { text-wrap: pretty; }
+@utility text-balance {
+  text-wrap: balance;
+}
+
+@utility text-pretty {
+  text-wrap: pretty;
+}
 
 @utility nara-dot-grid {
-  background-image: radial-gradient(circle at 1px 1px, rgba(245,240,232,0.06) 1px, transparent 0);
+  background-image: radial-gradient(circle at 1px 1px, rgba(245, 240, 232, 0.06) 1px, transparent 0);
   background-size: 24px 24px;
 }
 
 @utility nara-amber-glow {
-  background-image: radial-gradient(ellipse 800px 320px at 50% 40%, rgba(239,159,39,0.10) 0%, transparent 70%);
+  background-image: radial-gradient(ellipse 800px 320px at 50% 40%, rgba(239, 159, 39, 0.10) 0%, transparent 70%);
 }
 
 @utility nara-card {
@@ -136,10 +143,11 @@
   border-radius: var(--radius-2xl);
   transition: border-color .25s ease, box-shadow .25s ease, transform .25s ease;
 }
+
 @utility nara-card-hover {
   &:hover {
     border-color: color-mix(in oklab, var(--color-nara-amber) 35%, transparent);
-    box-shadow: 0 0 40px rgba(239,159,39,0.07);
+    box-shadow: 0 0 40px rgba(239, 159, 39, 0.07);
   }
 }
 
@@ -153,41 +161,72 @@
 }
 
 @keyframes nara-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(29,158,117,0.55); }
-  50%      { box-shadow: 0 0 0 8px rgba(29,158,117,0); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(29, 158, 117, 0.55);
+  }
+
+  50% {
+    box-shadow: 0 0 0 8px rgba(29, 158, 117, 0);
+  }
 }
+
 @utility nara-live-dot {
   display: inline-block;
-  width: 8px; height: 8px; border-radius: 9999px;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
   background: var(--color-nara-green);
   animation: nara-pulse 1.8s ease-out infinite;
 }
 
 @keyframes nara-amber-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(239,159,39,0.55); }
-  50%      { box-shadow: 0 0 0 8px rgba(239,159,39,0); }
+
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(239, 159, 39, 0.55);
+  }
+
+  50% {
+    box-shadow: 0 0 0 8px rgba(239, 159, 39, 0);
+  }
 }
+
 @utility nara-amber-dot {
   display: inline-block;
-  width: 8px; height: 8px; border-radius: 9999px;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
   background: var(--color-nara-amber);
   animation: nara-amber-pulse 1.8s ease-out infinite;
 }
 
 @keyframes nara-shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
+  0% {
+    background-position: -200% 0;
+  }
+
+  100% {
+    background-position: 200% 0;
+  }
 }
+
 @utility nara-shimmer {
   background: linear-gradient(90deg,
-    var(--color-nara-surface) 0%,
-    var(--color-nara-surface2) 50%,
-    var(--color-nara-surface) 100%);
+      var(--color-nara-surface) 0%,
+      var(--color-nara-surface2) 50%,
+      var(--color-nara-surface) 100%);
   background-size: 200% 100%;
   animation: nara-shimmer 1.8s linear infinite;
 }
 
 @keyframes ticker {
-  0%   { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
+  0% {
+    transform: translateX(0);
+  }
+
+  100% {
+    transform: translateX(-50%);
+  }
 }
