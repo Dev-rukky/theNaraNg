@@ -12,6 +12,7 @@ export function Hero({ initialData }: { initialData: LandingData }) {
 
   useGSAP(
     () => {
+      // 1. Entrance Sequence
       const tl = gsap.timeline({ defaults: { ease: "power3.out" } });
 
       tl.from(".hero-label", { y: 12, opacity: 0, duration: 0.6 }, 0.2)
@@ -35,12 +36,47 @@ export function Hero({ initialData }: { initialData: LandingData }) {
         .from(".hero-proof", { opacity: 0, duration: 0.6 }, 1.25)
         .from(
           ".hero-mock",
-          { y: 60, opacity: 0, duration: 1.1, ease: "power4.out" },
+          { y: 80, opacity: 0, duration: 1.1, ease: "power4.out" },
           1.0,
         );
+
+      // 2. Parallax Scroll Effect for the Dashboard Mockup[cite: 1]
+      gsap.to(".hero-mock", {
+        y: -100, // Floats upwards as you scroll down
+        ease: "none",
+        scrollTrigger: {
+          trigger: container.current,
+          start: "top top",
+          end: "bottom top",
+          scrub: 0.8, // Smoothly catches up to the scroll position[cite: 1]
+        },
+      });
     },
     { scope: container },
   );
+
+  // 3. Magnetic Button Hover Effect[cite: 1]
+  const handleMouseMove = (e: React.MouseEvent<HTMLElement>) => {
+    const btn = e.currentTarget;
+    const rect = btn.getBoundingClientRect();
+    const x = e.clientX - rect.left - rect.width / 2;
+    const y = e.clientY - rect.top - rect.height / 2;
+    gsap.to(btn, {
+      x: x * 0.25,
+      y: y * 0.25,
+      duration: 0.4,
+      ease: "power2.out",
+    });
+  };
+
+  const handleMouseLeave = (e: React.MouseEvent<HTMLElement>) => {
+    gsap.to(e.currentTarget, {
+      x: 0,
+      y: 0,
+      duration: 0.5,
+      ease: "elastic.out(1,0.5)",
+    });
+  };
 
   return (
     <section
@@ -76,12 +112,26 @@ export function Hero({ initialData }: { initialData: LandingData }) {
 
         <div className="mt-9 flex flex-wrap items-center justify-center gap-3">
           <div className="hero-cta">
-            <AmberButton variant="amber" size="lg" as={Link} href="#newsletter">
+            <AmberButton
+              variant="amber"
+              size="lg"
+              as={Link}
+              href="#newsletter"
+              onMouseMove={handleMouseMove}
+              onMouseLeave={handleMouseLeave}
+            >
               Get early access →
             </AmberButton>
           </div>
           <div className="hero-cta">
-            <AmberButton variant="ghost" size="lg" as={Link} href="#dashboard">
+            <AmberButton
+              variant="ghost"
+              size="lg"
+              as={Link}
+              href="#dashboard"
+              onMouseMove={handleMouseMove}
+              onMouseLeave={handleMouseLeave}
+            >
               View live markets
             </AmberButton>
           </div>
