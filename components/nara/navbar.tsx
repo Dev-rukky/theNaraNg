@@ -60,12 +60,12 @@ export default function Navbar() {
             Sign in
           </AmberButton>
 
-          <AmberButton
+          {/* <AmberButton
             variant="amber"
             size="md"
             as="a"
             href="/auth?mode=signup"
-          ></AmberButton>
+          ></AmberButton> */}
 
           {/* FIX 2: Changed as={Link} to as="a" */}
           <AmberButton
