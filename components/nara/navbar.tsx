@@ -19,9 +19,9 @@ export default function Navbar() {
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 100);
-    
-    handleScroll(); 
-    
+
+    handleScroll();
+
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
@@ -39,7 +39,7 @@ export default function Navbar() {
         <Link href="/" className="shrink-0">
           <NaraLogo />
         </Link>
-        
+
         <ul className="hidden items-center gap-8 md:flex">
           {links.map((l) => (
             <li key={l.label}>
@@ -52,14 +52,19 @@ export default function Navbar() {
             </li>
           ))}
         </ul>
-        
+
         <div className="flex items-center gap-2">
           <ThemeToggle />
           <AmberButton variant="ghost" size="md" as={Link} href="/auth">
             Sign in
           </AmberButton>
-          
-          <AmberButton variant="amber" size="md" as={Link} href="/auth?mode=signup">
+
+          <AmberButton
+            variant="amber"
+            size="md"
+            as={Link}
+            href="/auth?mode=signup"
+          >
             Get early access →
           </AmberButton>
         </div>

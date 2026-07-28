@@ -23,7 +23,7 @@ export function MarketTicker({ initialData }: { initialData: LandingData }) {
     },
     {
       scope: containerRef,
-      dependencies: [ticker.length], 
+      dependencies: [ticker.length],
     },
   );
 
