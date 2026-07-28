@@ -55,9 +55,11 @@ export default function Navbar() {
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <AmberButton variant="ghost" size="md" as={Link} href="/auth">
+          {/* FIX 1: Changed as={Link} to as="a" */}
+          <AmberButton variant="ghost" size="md" as="a" href="/auth">
             Sign in
           </AmberButton>
+<<<<<<< HEAD
 
           <AmberButton
             variant="amber"
@@ -65,6 +67,11 @@ export default function Navbar() {
             as={Link}
             href="/auth?mode=signup"
           >
+=======
+          
+          {/* FIX 2: Changed as={Link} to as="a" */}
+          <AmberButton variant="amber" size="md" as="a" href="/auth?mode=signup">
+>>>>>>> 7614567e9a713dcbf595f84157b606cdae504d79
             Get early access →
           </AmberButton>
         </div>

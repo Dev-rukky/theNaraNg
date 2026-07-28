@@ -13,14 +13,14 @@ export default async function HomePage() {
   const initialLandingData = await getLandingData();
 
   return (
-    <main>
+    <main className="min-h-screen bg-nara-black text-nara-text selection:bg-nara-amber selection:text-nara-black">
       <Navbar />
       <Hero initialData={initialLandingData} />
-      <MarketTicker initialData={initialLandingData} />
+      <MarketTicker initialData={initialLandingData} /> 
       <ProductBento initialData={initialLandingData} />
       <SignalTimeline />
       <SocialProof initialData={initialLandingData} />
-      <NewsletterCTA />
+      <NewsletterCTA /> 
       <PricingSection />
       <Footer />
     </main>

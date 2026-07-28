@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import { gsap, useGSAP } from "@/lib/nara/gsap"; // Importing from our clean GSAP utility
+import { gsap, useGSAP } from "@/lib/nara/gsap"; 
 import { DataLabel } from "./primitives";
 
 const PANELS = [
@@ -43,49 +43,48 @@ const PANELS = [
 ];
 
 export function SignalTimeline() {
-  // 1. Native React Ref for the outer container
   const containerRef = useRef<HTMLElement>(null);
-  
-  // 2. Ref specifically for the track that we will animate horizontally
+  const pinRef = useRef<HTMLDivElement>(null);
   const trackRef = useRef<HTMLDivElement>(null);
 
-  // 3. Official useGSAP hook
   useGSAP(() => {
-    // Media query to ensure this only runs on desktop viewports
-    const mq = window.matchMedia("(min-width: 768px)");
-    if (!mq.matches) return; // Mobile falls back to native vertical scroll
+    // gsap.matchMedia is the safest way to handle responsive animations in Next.js
+    const mm = gsap.matchMedia();
 
-    const track = trackRef.current;
-    if (!track) return;
+    // Only apply the horizontal scroll on desktop screens (768px and up)
+    mm.add("(min-width: 768px)", () => {
+      const track = trackRef.current;
+      const pinContainer = pinRef.current;
+      if (!track || !pinContainer) return;
 
-    // Create the horizontal scroll tween
-    gsap.to(track, {
-      // Calculate how far to move based on the total width minus the viewport width
-      x: () => -(track.scrollWidth - window.innerWidth), 
-      ease: "none",
-      scrollTrigger: {
-        trigger: ".signal-pin", // The container we are pinning
-        pin: true,              // Pin the container in place
-        scrub: 1,               // Smooth scrubbing (takes 1 second to catch up)
-        start: "top top",       // Start when the top of the container hits the top of the viewport
-        end: () => "+=" + (track.scrollWidth - window.innerWidth), // Pin for the exact length of the horizontal scroll
-        invalidateOnRefresh: true, // Recalculate on window resize
-      },
+      gsap.to(track, {
+        x: () => -(track.scrollWidth - window.innerWidth), 
+        ease: "none",
+        scrollTrigger: {
+          trigger: pinContainer, 
+          pin: true,              
+          scrub: 1,               
+          start: "top top",       
+          end: () => "+=" + (track.scrollWidth - window.innerWidth), 
+          invalidateOnRefresh: true, // Recalculates perfectly if the user resizes the window
+        },
+      });
     });
-  }, { scope: containerRef }); // Scope animations to this component
+
+    // Cleanup is handled automatically by gsap.matchMedia()
+  }, { scope: containerRef }); 
 
   return (
     <section ref={containerRef} className="relative bg-nara-black">
-      <div className="signal-pin relative overflow-hidden">
+      <div ref={pinRef} className="signal-pin relative overflow-hidden">
         <div className="absolute inset-0 nara-dot-grid opacity-40" />
         
-        {/* We attach the trackRef here so GSAP can calculate its scrollWidth */}
         <div 
           ref={trackRef} 
           className="signal-track flex md:h-screen md:flex-row md:flex-nowrap md:items-stretch flex-col"
         >
           {/* Intro panel */}
-          <div className="flex shrink-0 flex-col justify-center px-8 py-20 md:w-screen md:px-24">
+          <div className="flex shrink-0 flex-col justify-center px-8 py-20 md:w-screen md:px-24 relative z-10">
             <DataLabel>// Anatomy of a signal</DataLabel>
             <h2 className="mt-3 max-w-2xl text-balance text-3xl font-semibold tracking-[-0.03em] sm:text-4xl md:text-[56px] md:leading-[1.05]">
               How a market becomes <span className="text-nara-amber italic">a signal.</span>
@@ -103,7 +102,7 @@ export function SignalTimeline() {
           {PANELS.map((p) => (
             <article
               key={p.n}
-              className="signal-panel relative flex shrink-0 flex-col justify-center border-t border-nara-border px-8 py-16 md:w-[680px] md:border-l md:border-t-0 md:px-16 md:py-0"
+              className="signal-panel relative z-10 flex shrink-0 flex-col justify-center border-t border-nara-border bg-nara-black/50 backdrop-blur-sm px-8 py-16 md:w-[680px] md:border-l md:border-t-0 md:px-16 md:py-0"
             >
               <span className="font-mono text-[11px] uppercase tracking-widest text-nara-muted">
                 Panel {p.n}

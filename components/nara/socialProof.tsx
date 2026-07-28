@@ -1,19 +1,15 @@
 "use client";
 
 import { useRef } from "react";
-import { gsap, useGSAP } from "@/lib/nara/gsap"; // Importing from our clean GSAP utility
+import { gsap, useGSAP } from "@/lib/nara/gsap"; 
 import { fmtVol } from "@/lib/nara/format";
 import { useLandingData } from "@/lib/nara/uselandingdata";
 import type { LandingData } from "@/lib/nara/bayse.function";
 
 export function SocialProof({ initialData }: { initialData: LandingData }) {
-  // 1. Thread the server data into the hook
   const { stats } = useLandingData(initialData);
-  
-  // 2. Native React Ref for GSAP scoping
   const containerRef = useRef<HTMLElement>(null);
 
-  // 3. Official useGSAP hook
   useGSAP(() => {
     gsap.utils.toArray<HTMLElement>(".stat-num").forEach((el) => {
       const target = Number(el.dataset.target || "0");
@@ -25,9 +21,18 @@ export function SocialProof({ initialData }: { initialData: LandingData }) {
         v: target,
         duration: 2,
         ease: "power2.out",
-        scrollTrigger: { trigger: el, start: "top 90%" },
+        scrollTrigger: { 
+          trigger: el, 
+          start: "top 90%",
+          once: true // Ensures the counting animation only runs once per page load
+        },
+        onStart: () => {
+          // Snap to 0 immediately when the scroll trigger fires so it can count up smoothly
+          if (el.dataset.fmt === "vol") el.textContent = "₦0+";
+          else if (el.dataset.fmt === "pct") el.textContent = "0%";
+          else el.textContent = "0";
+        },
         onUpdate: () => {
-          // GSAP directly modifies the DOM text content here
           if (el.dataset.fmt === "vol") el.textContent = fmtVol(obj.v) + "+";
           else if (el.dataset.fmt === "pct") el.textContent = obj.v.toFixed(1) + "%";
           else el.textContent = Math.round(obj.v).toString();
@@ -42,7 +47,7 @@ export function SocialProof({ initialData }: { initialData: LandingData }) {
   return (
     <section ref={containerRef} className="border-y border-nara-border bg-nara-surface">
       <div className="mx-auto grid max-w-6xl grid-cols-1 gap-12 px-6 py-20 md:grid-cols-3 md:gap-6">
-        <div data-stat>
+        <div>
           <CountStatWrapper
             value={stats.volume}
             fmt="vol"
@@ -87,7 +92,6 @@ function CountStatWrapper({
       <div
         data-target={value}
         data-fmt={fmt}
-        // 4. suppressHydrationWarning is critical here because GSAP takes over the text content
         suppressHydrationWarning 
         className="stat-num font-mono text-5xl font-semibold tracking-[-0.02em] text-nara-amber tabular-nums sm:text-6xl md:text-7xl"
       >
