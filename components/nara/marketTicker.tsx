@@ -24,11 +24,7 @@ export function MarketTicker({ initialData }: { initialData: LandingData }) {
     },
     {
       scope: containerRef,
-<<<<<<< HEAD
-      dependencies: [ticker.length],
-=======
-      dependencies: [ticker?.length], 
->>>>>>> 7614567e9a713dcbf595f84157b606cdae504d79
+      dependencies: [ticker?.length],
     },
   );
 
@@ -58,11 +54,14 @@ export function MarketTicker({ initialData }: { initialData: LandingData }) {
           return (
             <span key={i} className="flex items-center gap-3 whitespace-nowrap">
               <span className="text-nara-text/90">{m.name}</span>
-              
-              <span className="text-nara-amber tabular-nums" suppressHydrationWarning>
+
+              <span
+                className="text-nara-amber tabular-nums"
+                suppressHydrationWarning
+              >
                 {m.yes.toFixed(1)}% YES
               </span>
-              
+
               <span
                 suppressHydrationWarning
                 className={
@@ -74,7 +73,7 @@ export function MarketTicker({ initialData }: { initialData: LandingData }) {
                 {up ? "+" : ""}
                 {m.delta.toFixed(1)}% {up ? "↑" : "↓"}
               </span>
-              
+
               <span className="text-nara-amber/60">·</span>
             </span>
           );

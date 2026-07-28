@@ -59,19 +59,21 @@ export default function Navbar() {
           <AmberButton variant="ghost" size="md" as="a" href="/auth">
             Sign in
           </AmberButton>
-<<<<<<< HEAD
 
           <AmberButton
             variant="amber"
             size="md"
-            as={Link}
+            as="a"
+            href="/auth?mode=signup"
+          ></AmberButton>
+
+          {/* FIX 2: Changed as={Link} to as="a" */}
+          <AmberButton
+            variant="amber"
+            size="md"
+            as="a"
             href="/auth?mode=signup"
           >
-=======
-          
-          {/* FIX 2: Changed as={Link} to as="a" */}
-          <AmberButton variant="amber" size="md" as="a" href="/auth?mode=signup">
->>>>>>> 7614567e9a713dcbf595f84157b606cdae504d79
             Get early access →
           </AmberButton>
         </div>
