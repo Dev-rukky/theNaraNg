@@ -8,6 +8,7 @@ import { SocialProof } from "@/components/nara/socialProof";
 import { NewsletterCTA } from "@/components/nara/newsletter";
 import { PricingSection } from "@/components/nara/pricingSection";
 import { Footer } from "@/components/nara/footer";
+import { Analytics } from "@vercel/analytics/next"
 
 export default async function HomePage() {
   const initialLandingData = await getLandingData();
