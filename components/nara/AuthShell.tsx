@@ -1,6 +1,9 @@
+// components/nara/AuthShell.tsx
 import Link from "next/link";
 import { type ReactNode } from "react";
 import { NaraLogo } from "./primitives";
+
+export type AuthStat = { label: string; value: string };
 
 export function AuthShell({
   eyebrow,
@@ -8,32 +11,36 @@ export function AuthShell({
   subtitle,
   children,
   footer,
+  stats,
 }: {
   eyebrow: string;
   title: string;
   subtitle: string;
   children: ReactNode;
   footer?: ReactNode;
+  /** Live figures for the side panel. Omitted (e.g. when Bayse is down) → the row is hidden, never faked. */
+  stats?: AuthStat[];
 }) {
   return (
-    <div className="relative min-h-screen overflow-hidden bg-nara-black text-nara-text">
+    <div className="relative min-h-[100svh] overflow-hidden bg-nara-black text-nara-text">
       {/* ambient glow + dot grid */}
       <div aria-hidden className="pointer-events-none absolute inset-0 nara-dot-grid opacity-60" />
       <div aria-hidden className="pointer-events-none absolute inset-x-0 -top-32 h-[520px] nara-amber-glow" />
 
       {/* top bar */}
       <header className="relative z-10 mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
-        <Link href="/" className="shrink-0">
+        <Link href="/" className="shrink-0" aria-label="naraNg home">
           <NaraLogo />
         </Link>
         <span className="font-mono text-[11px] uppercase tracking-widest text-nara-muted">
-          <span className="nara-amber-dot mr-2 align-middle" />
+          <span aria-hidden className="nara-amber-dot mr-2 align-middle" />
           secure channel
         </span>
       </header>
 
-      <main className="relative z-10 mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl grid-cols-1 gap-12 px-6 pb-16 pt-6 lg:grid-cols-[1.05fr_1fr] lg:gap-20 lg:pt-12">
-        {/* left: editorial copy */}
+      {/* 100svh: on phones, 100vh is taller than the visible screen (it ignores the browser bar). */}
+      <main className="relative z-10 mx-auto grid min-h-[calc(100svh-4rem)] max-w-6xl grid-cols-1 gap-12 px-6 pb-16 pt-6 lg:grid-cols-[1.05fr_1fr] lg:gap-20 lg:pt-12">
+        {/* left: editorial copy (desktop only) */}
         <section className="hidden flex-col justify-between lg:flex">
           <div>
             <p className="nara-label">{eyebrow}</p>
@@ -43,11 +50,13 @@ export function AuthShell({
             <p className="mt-5 max-w-sm text-[15px] leading-relaxed text-nara-muted">{subtitle}</p>
           </div>
 
-          <dl className="grid max-w-md grid-cols-3 gap-6 border-t border-nara-border pt-8">
-            <Stat label="Markets" value="24" />
-            <Stat label="Volume 24h" value="₦48.2M" />
-            <Stat label="Accuracy" value="73.4%" />
-          </dl>
+          {stats && stats.length > 0 && (
+            <dl className="grid max-w-md grid-cols-3 gap-6 border-t border-nara-border pt-8">
+              {stats.map((s) => (
+                <Stat key={s.label} label={s.label} value={s.value} />
+              ))}
+            </dl>
+          )}
 
           <p className="font-mono text-[11px] uppercase tracking-widest text-nara-amber">
             The signal must flow. — nara.ng
@@ -58,17 +67,17 @@ export function AuthShell({
         <section className="flex items-start lg:items-center">
           <div className="w-full">
             <div className="nara-card relative p-7 sm:p-9">
-              {/* corner amber accent */}
               <span
                 aria-hidden
                 className="absolute -top-px left-7 h-px w-12 bg-nara-amber"
                 style={{ boxShadow: "0 0 18px rgba(239,159,39,0.7)" }}
               />
+              {/* Mobile heading. Only one of the two h1s is ever displayed, so screen readers hear one. */}
               <div className="lg:hidden">
                 <p className="nara-label">{eyebrow}</p>
                 <h1 className="mt-2 text-2xl font-semibold tracking-tight">{title}</h1>
                 <p className="mt-1.5 text-sm text-nara-muted">{subtitle}</p>
-                <div className="my-6 h-px w-full bg-nara-border" />
+                <div aria-hidden className="my-6 h-px w-full bg-nara-border" />
               </div>
               {children}
             </div>

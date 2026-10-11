@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { Toaster } from "sonner";
 import "./globals.css";
 
 import { ThemeProvider } from "@/lib/theme";
@@ -23,6 +24,7 @@ export default async function RootLayout({
     <html lang="en" className={theme} style={{ colorScheme: theme }}>
       <body className="font-sans antialiased bg-background text-foreground">
         <ThemeProvider initialTheme={theme}>{children}</ThemeProvider>
+        <Toaster theme='dark' position="top-center" />
       </body>
     </html>
   );

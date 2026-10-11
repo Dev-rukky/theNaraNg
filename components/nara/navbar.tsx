@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { NaraLogo, AmberButton } from "./primitives";
-import { ThemeToggle } from "./themetoggle";
+import { ThemeToggle } from "./Themetoggle";
 import { cn } from "@/lib/utils";
 
 const links = [
