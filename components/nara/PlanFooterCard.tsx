@@ -2,10 +2,7 @@
 
 import Link from "next/link";
 import { usePlan, type Plan } from "@/lib/auth/usePlan";
-
-// Ideally import these from one shared constants file so the sidebar hint,
-// pricing copy and this card can never disagree.
-export const FREE_MARKETS_CAP = 10;
+import { FREE_MARKETS_CAP } from "@/lib/auth/access";
 const TOTAL_MARKETS_LABEL = "377+";
 
 type PlanConfig = {
@@ -23,7 +20,7 @@ const PLAN_CONFIG = {
 const CARD = "rounded-xl border border-nara-border bg-nara-surface2/60 p-3";
 
 type PlanFooterCardProps = {
-  /** Markets the user is currently following. Only used on the free plan. */
+  /** Markets the free plan is currently showing. Only used on the free plan. */
   marketsUsed?: number;
 };
 
@@ -62,7 +59,7 @@ function FreeUsage({ used }: { used: number }) {
   return (
     <>
       <p className="mt-2 font-mono text-[11px] text-nara-text">
-        {safeUsed} / {FREE_MARKETS_CAP} markets used
+        {safeUsed} / {FREE_MARKETS_CAP} markets
       </p>
 
       <div

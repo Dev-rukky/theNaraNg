@@ -7,22 +7,30 @@ import "server-only";
 import { cache } from "react";
 import { unstable_cache } from "next/cache";
 import { MARKETS, STATS, TICKER, USDNGN_HISTORY } from "./mock";
-import { bayseFetch } from "./bayse-client";
+import { BayseError, bayseFetch } from "./bayse-client";
 
 /* =============================================================== settings */
 
+const OPEN_EVENTS_REVALIDATE_S = 30; // the shared event list both pages build from
 const ALL_MARKETS_REVALIDATE_S = 30;
 const LANDING_REVALIDATE_S = 60;
 const EVENT_HISTORY_REVALIDATE_S = 120;
 const ROLLING_VOLUME_REVALIDATE_S = 600;
 
 const MAX_CONCURRENT_CALLS = 4;
-const BREAKER_MS = 60_000;
+const BREAKER_MS = 60_000; // after a rate limit (429)
+const OUTAGE_BREAKER_MS = 30_000; // after a timeout / network error / 5xx
+
+// Budget for each page of the event list (~650 KB per 100 events). Generous enough
+// for a slow connection; normally only the very first load waits on it, because
+// after that the cache serves stored data and refreshes in the background.
+const EVENTS_PAGE_CALL = { attempts: 2, timeoutMs: 12_000, overallDeadlineMs: 15_000 } as const;
 const RESOLVING_SOON_MS = 48 * 3600 * 1000;
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 const DELTA_EVENTS = 12; // how many top events get a 24h history lookup
-const PER_PAGE = 100;
-const MAX_PAGES = 6;
+const EVENTS_PAGE_SIZE = 100;
+const MAX_EVENT_PAGES = 10; // up to 1,000 open events (Bayse had 575 when this was written)
+const DESCRIPTION_CHARS = 300; // enough for categorising; keeps the cached list small
 
 const EVENT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -65,14 +73,27 @@ function coalesce<T>(key: string, fn: () => Promise<T>): Promise<T> {
   return p;
 }
 
+/** Thrown instead of calling Bayse while the breaker is open. Expected, so never logged as an error. */
+class BreakerOpenError extends Error {
+  constructor() {
+    super("Bayse temporarily paused after a failure — serving cached data");
+    this.name = "BreakerOpenError";
+  }
+}
+
 let breakerOpenUntil = 0;
 const breakerIsOpen = () => Date.now() < breakerOpenUntil;
 function tripBreaker(ms = BREAKER_MS) {
   breakerOpenUntil = Date.now() + ms;
-  console.warn(`[bayse] circuit breaker tripped for ${ms}ms`);
+  console.warn(`[bayse] Bayse unreachable or rate-limited; pausing calls for ${ms / 1000}s and serving cached data`);
 }
 function looksLikeRateLimit(err: unknown) {
   return /429|rate.?limit|too many requests/i.test(errMsg(err));
+}
+/** Bayse unreachable or failing on its side (not a bad request from us). */
+function looksLikeOutage(err: unknown, countServerErrors: boolean) {
+  if (err instanceof BayseError && err.status !== undefined) return countServerErrors && err.status >= 500;
+  return /timed out|fetch failed|network|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|socket/i.test(errMsg(err));
 }
 function errMsg(err: unknown) {
   return err instanceof Error ? err.message : String(err);
@@ -82,14 +103,19 @@ async function guardedBayseFetch<T>(
   path: string,
   opts: Parameters<typeof bayseFetch>[1],
 ): Promise<T> {
-  if (breakerIsOpen()) throw new Error("bayse circuit breaker open — skipping call");
+  if (breakerIsOpen()) throw new BreakerOpenError();
   return bayseLimit(async () => {
     // Re-check: the breaker may have tripped while this call waited in the queue.
-    if (breakerIsOpen()) throw new Error("bayse circuit breaker open — skipping call");
+    if (breakerIsOpen()) throw new BreakerOpenError();
     try {
       return await bayseFetch<T>(path, opts);
     } catch (err) {
-      if (looksLikeRateLimit(err)) tripBreaker();
+      // Either way, stop calling Bayse for a while so every page and poll fails
+      // fast (and falls back) instead of each one waiting out the timeouts.
+      if (looksLikeRateLimit(err)) tripBreaker(BREAKER_MS);
+      // Timeouts/network errors mean Bayse is unreachable. A 5xx only counts when
+      // the main events list fails; one event's history erroring shouldn't block the site.
+      else if (looksLikeOutage(err, opts?.integration === "list-events")) tripBreaker(OUTAGE_BREAKER_MS);
       throw err;
     }
   });
@@ -195,6 +221,9 @@ export type AllMarketsRow = {
   id: string;
   slug: string;
   name: string;
+  /** The specific market the YES price belongs to (events can hold several). Null for mock data. */
+  marketId: string | null;
+  marketTitle: string | null;
   category: MarketCategory | "other";
   /** YES probability, 0–100. */
   yes: number;
@@ -213,6 +242,8 @@ export type AllMarketsData = {
   source: "bayse" | "mock";
   degraded: boolean;
   degradedReason?: string;
+  /** True when the plan cap trimmed `rows` (free users); `total` is still the full count. */
+  limited?: boolean;
 };
 
 /* ================================================================ helpers */
@@ -359,9 +390,97 @@ async function fetchHistoryMap(ids: Iterable<string>, periodFor: (id: string) =>
   return new Map(entries);
 }
 
-function eventsPath(page: number, perPage: number) {
-  return `/pm/events?currency=NGN&perPage=${perPage}&page=${page}&status=open`;
+/**
+ * Bayse's page-size parameter is `size`. Any other name (perPage, limit, pageSize)
+ * is silently ignored and Bayse returns EVERY open event (~3.7 MB, 10–30 s).
+ */
+function eventsPath(page: number, size: number) {
+  return `/pm/events?currency=NGN&size=${size}&page=${page}&status=open`;
 }
+
+/**
+ * Keeps only what naraNg uses. A full event carries every outcome's market
+ * (~6.5 KB on average, 30+ KB for multi-candidate events); we only ever use the
+ * primary market. This keeps the cached list far under Next.js's 2 MB cache limit.
+ */
+function slimEvent(ev: BayseEvent): BayseEvent | null {
+  const pm = pickPrimaryMarket(ev);
+  if (ev.status !== "open" || !pm) return null;
+  return {
+    id: ev.id,
+    slug: ev.slug,
+    title: ev.title,
+    description: ev.description?.slice(0, DESCRIPTION_CHARS),
+    category: ev.category,
+    status: ev.status,
+    resolutionDate: ev.resolutionDate,
+    closingDate: ev.closingDate,
+    liquidity: ev.liquidity,
+    totalVolume: ev.totalVolume,
+    totalOrders: ev.totalOrders,
+    supportedCurrencies: ev.supportedCurrencies,
+    markets: [
+      {
+        id: pm.id,
+        title: pm.title,
+        status: pm.status,
+        outcome1Label: pm.outcome1Label,
+        outcome1Price: pm.outcome1Price,
+        outcome2Price: pm.outcome2Price,
+      },
+    ],
+  };
+}
+
+type OpenEvents = { events: BayseEvent[]; failedPages: number };
+
+/**
+ * Every open NGN event, fetched once and shared by the landing page and the
+ * markets feed. Page 1 must succeed; later pages that fail are skipped and reported.
+ */
+const cachedOpenEvents = unstable_cache(
+  async (): Promise<OpenEvents> => {
+    const call = { ...EVENTS_PAGE_CALL, integration: "list-events" as const };
+    const first = await guardedBayseFetch<BayseEventsResponse>(eventsPath(1, EVENTS_PAGE_SIZE), call);
+    const raw = [...(first?.events ?? [])];
+    const totalCount = first?.pagination?.totalCount ?? raw.length;
+
+    // If Bayse ever ignores `size` again, page 1 already holds everything:
+    // don't download the same list several more times.
+    const lastPage =
+      raw.length >= totalCount ? 1 : Math.min(first?.pagination?.lastPage ?? 1, MAX_EVENT_PAGES);
+
+    let failedPages = 0;
+    if (lastPage > 1) {
+      const results = await Promise.allSettled(
+        Array.from({ length: lastPage - 1 }, (_, i) =>
+          guardedBayseFetch<BayseEventsResponse>(eventsPath(i + 2, EVENTS_PAGE_SIZE), call),
+        ),
+      );
+      for (const r of results) {
+        if (r.status === "fulfilled") raw.push(...(r.value?.events ?? []));
+        else failedPages++;
+      }
+    }
+
+    // De-duplicate by id: pages can overlap if events open or close mid-fetch.
+    const byId = new Map<string, BayseEvent>();
+    for (const ev of raw) {
+      if (!ev?.id || byId.has(ev.id)) continue;
+      const slim = slimEvent(ev);
+      if (slim) byId.set(ev.id, slim);
+    }
+
+    const events = [...byId.values()];
+    if (!events.length) throw new Error("Bayse returned no open events");
+    return { events, failedPages };
+  },
+  ["bayse-open-events-v3"],
+  { revalidate: OPEN_EVENTS_REVALIDATE_S },
+);
+
+/** The dashboard layout and page ask at the same moment; on a cold cache they share one download. */
+const getOpenEvents = () => coalesce("open-events", () => cachedOpenEvents());
 
 /* ===================================================== 7-day notional volume */
 
@@ -370,7 +489,7 @@ const cachedRolling7dNotional = unstable_cache(
   async (): Promise<number> => {
     const fromDate = new Date(Date.now() - WEEK_MS).toISOString();
     const res = await guardedBayseFetch<BayseTradesResponse>(
-      `/pm/trades?perPage=50&fromDate=${encodeURIComponent(fromDate)}`,
+      `/pm/trades?size=50&fromDate=${encodeURIComponent(fromDate)}`,
       { attempts: 2, baseMs: 400, timeoutMs: 5000, integration: "list-events" },
     );
     const sample = res.data ?? [];
@@ -387,7 +506,7 @@ async function getRolling7dNotional(): Promise<number> {
   try {
     return await cachedRolling7dNotional();
   } catch (err) {
-    console.error("[bayse] trades volume rollup failed:", errMsg(err));
+    if (!(err instanceof BreakerOpenError)) console.warn("[bayse] trades volume rollup failed:", errMsg(err));
     return 0;
   }
 }
@@ -430,6 +549,8 @@ function buildMockAllMarkets(reason: string): AllMarketsData {
     id: m.id,
     slug: m.slug,
     name: m.name,
+    marketId: null,
+    marketTitle: null,
     category: "other",
     yes: m.yes,
     delta: m.delta,
@@ -452,12 +573,9 @@ function buildMockAllMarkets(reason: string): AllMarketsData {
 
 const cachedLandingData = unstable_cache(
   async (): Promise<LandingData> => {
-    const payload = await guardedBayseFetch<BayseEventsResponse>(eventsPath(1, 30), {
-      integration: "list-events",
-    });
-
-    const events = (payload?.events ?? []).filter((e) => e.status === "open" && e.markets?.length);
-    if (!events.length) throw new Error("Bayse returned no open events");
+    // Built from the full shared list, so "featured", the stats and "resolving
+    // soon" consider every open market, not just the first page.
+    const { events } = await getOpenEvents();
 
     const featuredEv = [...events].sort((a, b) => scoreFeatured(b) - scoreFeatured(a))[0];
     const featuredMarket = pickPrimaryMarket(featuredEv);
@@ -518,7 +636,7 @@ const cachedLandingData = unstable_cache(
       degraded: false,
     };
   },
-  ["bayse-landing-data-v2"],
+  ["bayse-landing-data-v3"],
   { revalidate: LANDING_REVALIDATE_S },
 );
 
@@ -532,7 +650,7 @@ export const getLandingData = cache(async (): Promise<LandingData> => {
     return data;
   } catch (err) {
     const reason = errMsg(err);
-    console.error("[bayse] landing data failed:", reason);
+    if (!(err instanceof BreakerOpenError)) console.warn("[bayse] landing data failed:", reason);
     if (lastGoodLanding) return { ...lastGoodLanding, degraded: true, degradedReason: reason };
     return buildMockLanding(reason);
   }
@@ -557,7 +675,7 @@ export async function getEventHistory(data: {
   try {
     return await cachedEventHistory(data.eventId, range);
   } catch (err) {
-    console.error(`[bayse] history for ${data.eventId} failed:`, errMsg(err));
+    if (!(err instanceof BreakerOpenError)) console.warn(`[bayse] history for ${data.eventId} failed:`, errMsg(err));
     return [];
   }
 }
@@ -566,35 +684,7 @@ export async function getEventHistory(data: {
 
 const cachedAllMarkets = unstable_cache(
   async (): Promise<AllMarketsData> => {
-    // Page 1 must succeed; otherwise throw and let the caller fall back.
-    const first = await guardedBayseFetch<BayseEventsResponse>(eventsPath(1, PER_PAGE), {
-      integration: "list-events",
-      attempts: 2,
-      timeoutMs: 6000,
-    });
-    const events = [...(first?.events ?? [])];
-    const lastPage = Math.min(first?.pagination?.lastPage ?? 1, MAX_PAGES);
-
-    // Later pages: keep whatever succeeds instead of failing the whole list.
-    let failedPages = 0;
-    if (lastPage > 1 && events.length >= PER_PAGE) {
-      const results = await Promise.allSettled(
-        Array.from({ length: lastPage - 1 }, (_, i) =>
-          guardedBayseFetch<BayseEventsResponse>(eventsPath(i + 2, PER_PAGE), {
-            integration: "list-events",
-            attempts: 2,
-            timeoutMs: 6000,
-          }),
-        ),
-      );
-      for (const r of results) {
-        if (r.status === "fulfilled") events.push(...(r.value?.events ?? []));
-        else failedPages++;
-      }
-    }
-
-    const open = events.filter((e) => e.status === "open" && e.markets?.length);
-    if (!open.length) throw new Error("Bayse returned no open markets");
+    const { events: open, failedPages } = await getOpenEvents();
 
     const topForDelta = [...open]
       .sort((a, b) => (b.totalVolume ?? 0) - (a.totalVolume ?? 0))
@@ -619,6 +709,8 @@ const cachedAllMarkets = unstable_cache(
         id: ev.id,
         slug: ev.slug,
         name: ev.title,
+        marketId: pm?.id ?? null,
+        marketTitle: pm?.title ?? null,
         category: categorize(ev),
         yes: yesPercent(pm),
         delta: hist ? computeDelta(hist, pm?.id) : null,
@@ -638,7 +730,7 @@ const cachedAllMarkets = unstable_cache(
       degradedReason: failedPages > 0 ? `${failedPages} page(s) failed to load` : undefined,
     };
   },
-  ["bayse-all-markets-v2"],
+  ["bayse-all-markets-v4"],
   { revalidate: ALL_MARKETS_REVALIDATE_S },
 );
 
@@ -652,7 +744,7 @@ export const getAllMarkets = cache(async (): Promise<AllMarketsData> => {
     return data;
   } catch (err) {
     const reason = errMsg(err);
-    console.error("[bayse] getAllMarkets failed:", reason);
+    if (!(err instanceof BreakerOpenError)) console.warn("[bayse] getAllMarkets failed:", reason);
     if (lastGoodAllMarkets) {
       return { ...lastGoodAllMarkets, degraded: true, degradedReason: reason };
     }

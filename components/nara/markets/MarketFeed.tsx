@@ -2,6 +2,7 @@
 "use client";
 
 import { useCallback, useDeferredValue, useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import {
   ArrowDown,
   ArrowUp,
@@ -15,6 +16,8 @@ import {
 import { DegradedBanner } from "@/components/nara/DegradedBanner";
 import { DeltaBadge, OddsBar } from "@/components/nara/primitives";
 import { OddsHistoryChart } from "@/components/nara/OddsHistoryChart";
+import { MakeCall } from "@/components/nara/predictions/MakeCall";
+import type { MyCall, MyOpenCalls } from "@/lib/nara/predictions.shared";
 import {
   Sheet,
   SheetContent,
@@ -156,7 +159,14 @@ function useWatchlist() {
 
 /* ------------------------------------------------------------------- feed */
 
-export function MarketsFeed({ initial }: { initial: MarketsSnapshot }) {
+export function MarketsFeed({
+  initial,
+  myCalls = {},
+}: {
+  initial: MarketsSnapshot;
+  /** The signed-in user's open calls, keyed by event id. */
+  myCalls?: MyOpenCalls;
+}) {
   const [rawRefresh, setRawRefresh] = useStoredString(REFRESH_KEY);
   const refreshMs = toRefreshMs(rawRefresh);
   const { data, fetchedAt, isFetching, error, refresh } = useMarketsPolling(initial, refreshMs);
@@ -241,6 +251,21 @@ export function MarketsFeed({ initial }: { initial: MarketsSnapshot }) {
   return (
     <div className="space-y-6">
       {data.degraded && <DegradedBanner />}
+
+      {data.limited && (
+        <div className="flex flex-col gap-3 rounded-2xl border border-nara-amber/30 bg-nara-amber/5 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-nara-text">
+            You&apos;re seeing the top {data.rows.length} markets by volume.{" "}
+            <span className="text-nara-muted">Pro unlocks all {data.total}, plus the Naira tracker and alerts.</span>
+          </p>
+          <Link
+            href="/pricing"
+            className="shrink-0 rounded-md bg-nara-amber px-3 py-1.5 text-center font-mono text-[11px] font-medium uppercase tracking-widest text-nara-black transition-colors hover:bg-nara-amber2"
+          >
+            Upgrade to Pro <span aria-hidden>→</span>
+          </Link>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard label="Total volume" value={fmtVol(summary.totalVol)} />
@@ -461,7 +486,11 @@ export function MarketsFeed({ initial }: { initial: MarketsSnapshot }) {
         )}
       </section>
 
-      <QuickViewPanel row={selected} onClose={() => setSelectedId(null)} />
+      <QuickViewPanel
+        row={selected}
+        myCall={selected ? myCalls[selected.id] : undefined}
+        onClose={() => setSelectedId(null)}
+      />
     </div>
   );
 }
@@ -601,7 +630,15 @@ function CategoryChip({ cat }: { cat: MarketCategory | "other" }) {
   );
 }
 
-function QuickViewPanel({ row, onClose }: { row: AllMarketsRow | null; onClose: () => void }) {
+function QuickViewPanel({
+  row,
+  myCall,
+  onClose,
+}: {
+  row: AllMarketsRow | null;
+  myCall?: MyCall;
+  onClose: () => void;
+}) {
   return (
     <Sheet open={!!row} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
@@ -641,11 +678,14 @@ function QuickViewPanel({ row, onClose }: { row: AllMarketsRow | null; onClose: 
               />
             </div>
 
-            <div className="mt-5 rounded-xl border border-nara-border bg-nara-surface2/60 p-4">
-              <div className="mb-3 font-mono text-[10px] uppercase tracking-widest text-nara-muted">
-                Orderbook · indicative
-              </div>
-              <MockOrderbook yes={row.yes} />
+            <div className="mt-5">
+              <MakeCall
+                eventId={row.id}
+                yes={row.yes}
+                resolvesAt={row.resolvesAt}
+                resolved={row.status === "resolved" || !row.marketId}
+                myCall={myCall}
+              />
             </div>
           </>
         )}
@@ -669,51 +709,6 @@ function MiniStat({
       <div className={cn("mt-1 font-mono text-lg font-semibold tabular-nums", TONE_TEXT[tone])}>
         {value}
       </div>
-    </div>
-  );
-}
-
-function MockOrderbook({ yes }: { yes: number }) {
-  const mid = yes / 100;
-  const levels = Array.from({ length: 5 }, (_, i) => {
-    const offset = (i + 1) * 0.01;
-    return {
-      bid: Math.max(0.01, mid - offset),
-      ask: Math.min(0.99, mid + offset),
-      bidSize: Math.round(1200 / (i + 1)) * 100,
-      askSize: Math.round(900 / (i + 1)) * 100,
-    };
-  });
-
-  return (
-    <div className="grid grid-cols-2 gap-3 font-mono text-[11px] tabular-nums">
-      <BookSide title="Bid" tone="text-nara-green" levels={levels.map((l) => [l.bid, l.bidSize])} />
-      <BookSide title="Ask" tone="text-nara-red" levels={levels.map((l) => [l.ask, l.askSize])} />
-    </div>
-  );
-}
-
-function BookSide({
-  title,
-  tone,
-  levels,
-}: {
-  title: string;
-  tone: string;
-  levels: [price: number, size: number][];
-}) {
-  return (
-    <div>
-      <div className="mb-1 flex justify-between text-[9px] uppercase tracking-widest text-nara-muted">
-        <span>{title}</span>
-        <span>Size</span>
-      </div>
-      {levels.map(([price, size], i) => (
-        <div key={i} className={cn("flex justify-between py-0.5", tone)}>
-          <span>{(price * 100).toFixed(1)}¢</span>
-          <span className="text-nara-muted">₦{size.toLocaleString("en-NG")}</span>
-        </div>
-      ))}
     </div>
   );
 }

@@ -12,6 +12,7 @@ import {
   BellRing,
   BookOpen,
   LineChart,
+  Lock,
   LogOut,
   Menu,
   Settings as SettingsIcon,
@@ -33,13 +34,16 @@ import { DashboardLiveBar } from "@/components/nara/DashboardLiveBar";
 import { ThemeToggle } from "@/components/nara/Themetoggle";
 import { LiveClock } from "@/components/nara/LiveClock";
 import type { LandingData } from "@/lib/nara/bayse";
+import { canAccess, FREE_MARKETS_CAP, ROUTE_ACCESS, type DashboardRoute } from "@/lib/auth/access";
+import { usePlan } from "@/lib/auth/PlanProvider";
+import type { Plan } from "@/lib/auth/plan";
 
+// Who can open each page lives in lib/auth/access.ts (ROUTE_ACCESS), not here.
 type NavItem = {
-  href: string;
+  href: DashboardRoute;
   label: string;
   icon: LucideIcon;
   badge?: { tone: NavBadgeTone; text: string };
-  adminOnly?: boolean;
 };
 
 type NavSection = { label: string; items: NavItem[] };
@@ -50,7 +54,7 @@ const SECTIONS: NavSection[] = [
     items: [
       { href: "/dashboard", label: "Markets", icon: Activity, badge: { tone: "live", text: "Live" } },
       { href: "/naira", label: "Naira Tracker", icon: Banknote },
-      { href: "/sharp-money", label: "Sharp Money", icon: LineChart, badge: { tone: "count", text: "3" } },
+      { href: "/sharp-money", label: "Sharp Money", icon: LineChart },
       { href: "/analytics", label: "Analytics", icon: TrendingUp },
     ],
   },
@@ -67,8 +71,8 @@ const SECTIONS: NavSection[] = [
     items: [
       { href: "/api-access", label: "API & SDK", icon: Terminal, badge: { tone: "api", text: "API" } },
       { href: "/settings", label: "Settings", icon: SettingsIcon },
-      { href: "/diagnostics", label: "Diagnostics", icon: Stethoscope, badge: { tone: "admin", text: "Admin" }, adminOnly: true },
-      { href: "/admin", label: "Admin", icon: Shield, badge: { tone: "admin", text: "Admin" }, adminOnly: true },
+      { href: "/diagnostics", label: "Diagnostics", icon: Stethoscope, badge: { tone: "admin", text: "Admin" } },
+      { href: "/admin", label: "Admin", icon: Shield, badge: { tone: "admin", text: "Admin" } },
     ],
   },
 ];
@@ -92,15 +96,27 @@ export function DashboardShell({
   isAdmin: boolean;
 }) {
   const pathname = usePathname() ?? "";
+  const { plan } = usePlan();
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // Admin pages are hidden from everyone else; paid pages stay visible but locked.
   const sections = useMemo(
     () =>
-      SECTIONS.map((s) => ({ ...s, items: s.items.filter((i) => !i.adminOnly || isAdmin) })).filter(
-        (s) => s.items.length > 0,
-      ),
+      SECTIONS.map((s) => ({
+        ...s,
+        items: s.items.filter((i) => ROUTE_ACCESS[i.href] !== "admin" || isAdmin),
+      })).filter((s) => s.items.length > 0),
     [isAdmin],
   );
+
+  const sidebarProps = {
+    sections,
+    pathname,
+    userLabel,
+    plan,
+    isAdmin,
+    freeMarketsShown: Math.min(FREE_MARKETS_CAP, landing.stats.markets),
+  };
 
   // Mobile drawer: close on Escape and stop the page scrolling behind it.
   useEffect(() => {
@@ -121,7 +137,7 @@ export function DashboardShell({
     <div className="min-h-screen bg-nara-black text-nara-text">
       {/* desktop sidebar */}
       <aside className="fixed inset-y-0 left-0 z-30 hidden w-[240px] border-r border-nara-border bg-nara-surface md:block">
-        <Sidebar sections={sections} pathname={pathname} userLabel={userLabel} />
+        <Sidebar {...sidebarProps} />
       </aside>
 
       {/* mobile drawer */}
@@ -148,7 +164,7 @@ export function DashboardShell({
               </button>
             </div>
             <div className="min-h-0 flex-1">
-              <Sidebar sections={sections} pathname={pathname} userLabel={userLabel} onNavigate={closeMobile} />
+              <Sidebar {...sidebarProps} onNavigate={closeMobile} />
             </div>
           </aside>
         </div>
@@ -194,11 +210,17 @@ function Sidebar({
   sections,
   pathname,
   userLabel,
+  plan,
+  isAdmin,
+  freeMarketsShown,
   onNavigate,
 }: {
   sections: NavSection[];
   pathname: string;
   userLabel: string;
+  plan: Plan;
+  isAdmin: boolean;
+  freeMarketsShown: number;
   onNavigate?: () => void;
 }) {
   return (
@@ -218,6 +240,8 @@ function Sidebar({
             <div className="space-y-0.5">
               {section.items.map((item) => {
                 const active = isActive(pathname, item.href);
+                // Locked pages still open: they show the upgrade prompt instead of the content.
+                const locked = !canAccess(ROUTE_ACCESS[item.href], plan, isAdmin);
                 const Icon = item.icon;
                 return (
                   <Link
@@ -239,7 +263,15 @@ function Sidebar({
                       <Icon className="size-4 shrink-0" aria-hidden />
                       <span className="truncate">{item.label}</span>
                     </span>
-                    {item.badge && <NavBadge tone={item.badge.tone}>{item.badge.text}</NavBadge>}
+                    <span className="flex shrink-0 items-center gap-1.5">
+                      {item.badge && <NavBadge tone={item.badge.tone}>{item.badge.text}</NavBadge>}
+                      {locked && (
+                        <>
+                          <Lock className="size-3 text-nara-muted/70" aria-hidden />
+                          <span className="sr-only">(upgrade required)</span>
+                        </>
+                      )}
+                    </span>
                   </Link>
                 );
               })}
@@ -249,7 +281,7 @@ function Sidebar({
       </nav>
 
       <div className="space-y-3 border-t border-nara-border pt-4">
-        <PlanFooterCard />
+        <PlanFooterCard marketsUsed={freeMarketsShown} />
         <div className="truncate px-1 font-mono text-[11px] text-nara-muted">{userLabel}</div>
         <form action={signOut}>
           <SignOutButton />
